@@ -53,7 +53,7 @@ async function requireIT(req, _res, next) {
     if (!person || person.active !== true || !['manager', 'agent'].includes(person.role)) {
       fail(403, 'Tài khoản chưa được cấp quyền IT.');
     }
-    req.it = { uid: decoded.uid, ...person };
+    req.it = { ...person, uid: decoded.uid };
     next();
   } catch (err) { next(err); }
 }
@@ -86,7 +86,7 @@ async function requireRequester(req, _res, next) {
     const snap = await db.ref(`requesters/${decoded.uid}`).get();
     if (!snap.exists()) fail(403, 'Bạn cần hoàn tất hồ sơ người yêu cầu.');
     if (!isRequesterEnabled(snap.val())) fail(403, 'Tài khoản đã bị quản lý khóa.');
-    req.requester = { uid: decoded.uid, ...snap.val() };
+    req.requester = { ...snap.val(), uid: decoded.uid };
     next();
   } catch (err) { next(err); }
 }

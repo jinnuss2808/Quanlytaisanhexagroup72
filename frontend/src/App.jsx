@@ -137,7 +137,7 @@ function PublicRequestForm({ requester = null }) {
               <button type="submit" className="btn primary submit-btn" disabled={busy}>{busy ? 'Đang gửi...' : <>Gửi yêu cầu <Send size={17}/></>}</button></div>
           </form></>}
       </div>
-      {requester && <div className="page-width requester-list"><RequesterTickets uid={requester.uid}/></div>}
+      {requester && <div className="page-width requester-list"><RequesterTickets uid={requester.uid || auth.currentUser?.uid}/></div>}
     </main><footer className="public-footer"><div className="page-width"><Brand compact/><span>© {new Date().getFullYear()} HEXA · IT Service Desk</span><span>Hỗ trợ nội bộ · Bảo mật & chuyên nghiệp</span></div></footer>
   </div>;
 }
@@ -236,7 +236,12 @@ function RequesterTickets({ uid }) {
   const reloadTickets = () => api('/requester/tickets').then(setTickets).catch(err => setError(err.message));
   useEffect(() => {
     reloadTickets(); // Backend API still works when the RTDB client listener is not available.
-    const q = query(ref(realtimeDb, 'tickets'), orderByChild('requesterUid'), equalTo(uid));
+    const requesterUid = uid || auth.currentUser?.uid;
+    if (typeof requesterUid !== 'string' || !requesterUid.trim()) {
+      setError('Thiếu UID tài khoản người yêu cầu; vui lòng đăng nhập lại.');
+      return;
+    }
+    const q = query(ref(realtimeDb, 'tickets'), orderByChild('requesterUid'), equalTo(requesterUid));
     return onValue(q, snap => setTickets(realtimeList(snap.val())),
       err => setError('Không có quyền xem realtime, hãy triển khai Firebase Rules hoặc bấm Làm mới: ' + err.message));
   }, [uid]);
@@ -278,7 +283,24 @@ function LoginPage() {
   const [loading, setLoading] = useState(false); const [error, setError] = useState('');
   const submit = async e => { e.preventDefault(); setLoading(true); setError('');
     try { await signInWithEmailAndPassword(auth, email.trim(), password); }
-    catch { setError('Đăng nhập không thành công. Kiểm tra email, mật khẩu và cấu hình Firebase.'); }
+    catch (err) {
+      const code = err?.code || 'auth/unknown';
+      const messages = {
+        'auth/invalid-api-key': 'Firebase API Key không hợp lệ trên bản deploy.',
+        'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'Firebase API Key không hợp lệ trên bản deploy.',
+        'auth/operation-not-allowed': 'Chưa bật đăng nhập Email/Password trong Firebase Authentication.',
+        'auth/user-disabled': 'Tài khoản đã bị khóa trong Firebase Authentication.',
+        'auth/network-request-failed': 'Trình duyệt không kết nối được Firebase Authentication.',
+        'auth/too-many-requests': 'Firebase tạm khóa đăng nhập do thử nhiều lần. Hãy thử lại sau.',
+        'auth/invalid-credential': 'Firebase không chấp nhận email/mật khẩu trong project hiện tại. Hãy đối chiếu Firebase Authentication > Users.',
+        'auth/wrong-password': 'Firebase báo mật khẩu không khớp với tài khoản trong project hiện tại.',
+        'auth/user-not-found': 'Firebase không tìm thấy tài khoản trong project hiện tại.',
+        'auth/unauthorized-domain': 'Tên miền web chưa được cho phép trong Firebase Authentication.',
+        'auth/configuration-not-found': 'Firebase Authentication chưa có cấu hình đăng nhập Email/Password.'
+      };
+      console.error('[HEXA AUTH ERROR]', code);
+      setError(`${messages[code] || 'Firebase Authentication không đăng nhập được.'} (Mã: ${code})`);
+    }
     finally { setLoading(false); }
   };
   return <div className="login-root"><div className="login-image-panel"><div className="login-panel-top"><Brand/></div><div className="login-panel-center"><div className="login-panel-tag"><ShieldCheck size={17}/> KHU VỰC DÀNH CHO IT</div><h1>Quản lý công việc.<br/><em>Tối ưu hỗ trợ.</em></h1><p>Toàn bộ yêu cầu từ nhân sự được tổng hợp, phân công và theo dõi trên cùng một nền tảng.</p><div className="login-cards"><div><Ticket size={20}/><span>Ticket tập trung</span></div><div><UsersRound size={20}/><span>Phân công thông minh</span></div><div><Bell size={20}/><span>Thông báo kịp thời</span></div></div></div><span className="login-watermark">HEXA.</span></div>
@@ -333,14 +355,26 @@ function Dashboard({ user, onLogout }) {
   useEffect(() => {
     refresh();
     // Firebase RTDB listeners update tickets and notifications as soon as data changes.
+    // Always use the signed-in Firebase Auth UID. Never call equalTo(undefined).
+    const effectiveUid = auth.currentUser?.uid || user.uid;
+    const validUid = typeof effectiveUid === 'string' && effectiveUid.trim().length > 0;
     const ticketsQuery = user.role === 'manager'
       ? query(ref(realtimeDb, 'tickets'), orderByChild('createdAt'), limitToLast(200))
-      : query(ref(realtimeDb, 'tickets'), orderByChild('assignedTo'), equalTo(user.uid));
-    const notificationQuery = query(ref(realtimeDb, `notifications/${user.uid}`), orderByChild('createdAt'), limitToLast(50));
-    const unsubscribeTickets = onValue(ticketsQuery, snap => setTickets(realtimeList(snap.val()).slice(0, 200)),
-      err => setError('Không nhận được dữ liệu ticket trực tiếp: ' + err.message));
-    const unsubscribeNotifications = onValue(notificationQuery, snap => setNotifications(realtimeList(snap.val())),
-      err => setError('Không nhận được thông báo trực tiếp: ' + err.message));
+      : validUid
+        ? query(ref(realtimeDb, 'tickets'), orderByChild('assignedTo'), equalTo(effectiveUid))
+        : null;
+    const notificationQuery = validUid
+      ? query(ref(realtimeDb, `notifications/${effectiveUid}`), orderByChild('createdAt'), limitToLast(50))
+      : null;
+    if (!validUid) setError('Thiếu UID tài khoản Firebase, vui lòng đăng xuất rồi đăng nhập lại.');
+    const unsubscribeTickets = ticketsQuery
+      ? onValue(ticketsQuery, snap => setTickets(realtimeList(snap.val()).slice(0, 200)),
+        err => setError('Không nhận được dữ liệu ticket trực tiếp: ' + err.message))
+      : () => {};
+    const unsubscribeNotifications = notificationQuery
+      ? onValue(notificationQuery, snap => setNotifications(realtimeList(snap.val())),
+        err => setError('Không nhận được thông báo trực tiếp: ' + err.message))
+      : () => {};
     return () => { unsubscribeTickets(); unsubscribeNotifications(); };
   }, [refresh, user.role, user.uid]);
   const openTicket = ticket => { setSelected(ticket); };
@@ -955,7 +989,7 @@ export default function App() {
   useEffect(() => {
     let alive = true;
     if (!isIT || !firebaseUser) { setProfile(null); return; }
-    api('/me').then(p => { if (alive) { setProfile(p); setAuthError(''); } })
+    api('/me').then(p => { if (alive) { setProfile({ ...p, uid: firebaseUser.uid }); setAuthError(''); } })
       .catch(async err => { if (alive) { setProfile(null); setAuthError(err.message); await signOut(auth); } });
     return () => { alive = false; };
   }, [firebaseUser, isIT]);
