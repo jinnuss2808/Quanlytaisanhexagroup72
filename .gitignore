@@ -33,3 +33,17 @@ dist/
 *.zip
 *.7z
 *.rar
+
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/service-account.json
+**/*firebase-admin*.json
+**/*serviceAccountKey*.json
+**/node_modules/
+**/.vercel/
+**/dist/
+

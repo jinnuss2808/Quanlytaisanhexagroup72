@@ -1,368 +1,281 @@
-﻿# HEXA Unified deployment assistant - GitHub private + two Vercel projects.
-# It reads existing local .env files, and NEVER commits .env or Firebase Admin keys.
-# Requires user-approved browser login to GitHub/Vercel on the first run.
+﻿# HEXA: clean GitHub + Vercel deployment for Windows PowerShell 5.1+
+# Never commit .env or Firebase Admin JSON. Only the API receives the service-account secret.
 [CmdletBinding()]
-param(
-  [Parameter(Mandatory=$true)][string] $ProjectRoot
-)
+param()
 $ErrorActionPreference = 'Stop'
-$ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot.Trim('"').TrimEnd('\','/'))
+$ProgressPreference = 'SilentlyContinue'
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoName = 'ticket-asset-hexa'
-$FrontendName = 'ticket-asset-hexa'
-$BackendName = 'ticket-asset-hexa-api'
-$script:Git = $null
-$script:Gh = $null
-$script:Vercel = $null
-$script:Npm = $null
-$script:Node = $null
-$script:Firebase = $null
+$ApiProject = 'ticket-asset-hexa-api'
+$FrontendProject = 'ticket-asset-hexa'
+$VercelScope = 'trungs-projects' # Theo Vercel URL ma ban da gui; thay neu doi team
+$ApiDomain = 'https://ticket-asset-hexa-api.vercel.app'
+$WebDomain = 'https://ticket-asset-hexa.vercel.app'
+$Work = Join-Path $env:TEMP ('hexa-clean-deploy-' + [guid]::NewGuid().ToString('N'))
+$Repo = Join-Path $Work 'repo'
 
-function Header([string] $title) {
-  Write-Host "`n======= $title =======" -ForegroundColor Cyan
+function Step([string]$message) { Write-Host "`n==== $message ====" -ForegroundColor Cyan }
+function Require([string]$cmd, [string]$how) {
+  if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { throw "Thieu $cmd. $how" }
 }
-function Fail([string] $msg) { throw $msg }
-function Find-Command([string[]] $names) {
-  foreach ($n in $names) {
-    $cmd = Get-Command $n -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd) { return $cmd.Source }
-  }
-  return $null
-}
-function Run([string] $tool, [string[]] $arguments) {
-  & $tool @arguments
-  if ($LASTEXITCODE -ne 0) { Fail "Lenh that bai (exit $LASTEXITCODE): $([IO.Path]::GetFileName($tool)) $($arguments -join ' ')" }
-}
-function Try-Native([string] $tool, [string[]] $arguments) {
-  $oldPref = $ErrorActionPreference
+function Run([string]$name, [string[]]$arguments) {
+  # Windows PowerShell 5 can convert benign native stderr into terminating errors.
+  $oldErrorPreference = $ErrorActionPreference
   try {
     $ErrorActionPreference = 'Continue'
-    $data = @(& $tool @arguments 2>$null)
-    return @{ Data = $data; Code = $LASTEXITCODE }
-  } finally { $ErrorActionPreference = $oldPref }
+    & $name @arguments
+    $status = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $oldErrorPreference }
+  if ($status -ne 0) { throw "Lenh that bai ($status): $name $($arguments -join ' ')" }
 }
-function Require-Files {
-  foreach ($relative in @('frontend/package.json','frontend/.env','backend/package.json','backend/.env','backend/service-account.json')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot $relative) -PathType Leaf)) {
-      Fail "Thieu $relative. Hay dung ban HEXA da duoc cau hinh; KHONG can gui khoa JSON cho ai."
-    }
-  }
-  if (-not (Test-Path (Join-Path $ProjectRoot 'frontend/vercel.json'))) {
-    Fail 'Thieu frontend/vercel.json (cau hinh SPA).'
-  }
-  $candidate = (Resolve-Path -LiteralPath $ProjectRoot).Path
-  if ($candidate -match '(^|[\\/])node_modules([\\/]|$)') { Fail 'Duong dan project khong hop le.' }
-}
-function Read-DotEnv([string] $path) {
-  $out = @{}
-  foreach ($raw in [IO.File]::ReadAllLines($path)) {
-    $line = $raw.Trim()
-    if ($line.Length -eq 0 -or $line.StartsWith('#')) { continue }
-    if ($line -match '^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-      $name = $Matches[1]; $value = $Matches[2].Trim()
+function Read-Env([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { throw "Thieu file cau hinh: $path" }
+  $values = @{}
+  foreach ($line in [IO.File]::ReadAllLines($path)) {
+    if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') {
+      $key = $matches[1]; $value = $matches[2].Trim()
       if ($value.Length -ge 2 -and (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'")))) {
-        $value = $value.Substring(1,$value.Length-2)
+        $value = $value.Substring(1, $value.Length - 2)
       }
-      $out[$name] = $value
+      $values[$key] = $value
     }
   }
-  return $out
+  return $values
 }
-function Install-By-Winget([string] $id) {
-  $wg = Find-Command @('winget.exe','winget')
-  if (-not $wg) { Fail "Thieu $id va khong co winget. Hay cai ung dung va chay lai BAT." }
-  Write-Host "Dang cai $id qua winget (co the can xac nhan)..." -ForegroundColor Yellow
-  Run $wg @('install','--id',$id,'--exact','--source','winget','--accept-package-agreements','--accept-source-agreements')
-}
-function Setup-Tools {
-  Header '1. KIEM TRA CONG CU'
-  $script:Node = Find-Command @('node.exe','node')
-  $script:Npm = Find-Command @('npm.cmd','npm')
-  if (-not $script:Node -or -not $script:Npm) { Fail 'Can Node.js 22+ va npm. Cai tai https://nodejs.org va chay lai.' }
-  $v = (& $script:Node -v).Trim()
-  if ($v -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) { Fail "Can Node.js >=22; hien tai la $v." }
-
-  $script:Git = Find-Command @('git.exe','git')
-  if (-not $script:Git) {
-    Install-By-Winget 'Git.Git'
-    $script:Git = Find-Command @('git.exe','git')
-    if (-not $script:Git -and (Test-Path "$env:ProgramFiles\Git\cmd\git.exe")) { $script:Git="$env:ProgramFiles\Git\cmd\git.exe" }
-    if (-not $script:Git) { Fail 'Git da cai nhung chua vao PATH. Dong va mo lai CMD, sau do chay BAT.' }
+function Is-Excluded([string]$rel) {
+  $parts = $rel -split '[\\/]'
+  foreach ($part in $parts) {
+    if ($part -in @('node_modules','.git','.vercel','dist','coverage','build','.next')) { return $true }
   }
-
-  $script:Gh = Find-Command @('gh.exe','gh')
-  if (-not $script:Gh) {
-    Install-By-Winget 'GitHub.cli'
-    $script:Gh = Find-Command @('gh.exe','gh')
-    if (-not $script:Gh -and (Test-Path "$env:ProgramFiles\GitHub CLI\gh.exe")) { $script:Gh="$env:ProgramFiles\GitHub CLI\gh.exe" }
-    if (-not $script:Gh) { Fail 'GitHub CLI da cai nhung chua vao PATH. Mo lai CMD va chay BAT.' }
-  }
-
-  $script:Vercel = Find-Command @('vercel.cmd','vercel')
-  if (-not $script:Vercel) {
-    Write-Host 'Dang cai Vercel CLI...' -ForegroundColor Yellow
-    Run $script:Npm @('install','--global','vercel')
-    $script:Vercel = Find-Command @('vercel.cmd','vercel')
-    if (-not $script:Vercel) {
-      $npmPrefix = (& $script:Npm 'prefix' '--global' | Select-Object -Last 1).Trim()
-      if ($npmPrefix -and (Test-Path (Join-Path $npmPrefix 'vercel.cmd'))) { $script:Vercel = Join-Path $npmPrefix 'vercel.cmd' }
-    }
-    if (-not $script:Vercel) { Fail 'Cai Vercel CLI xong nhung khong tim thay lenh vercel. Mo lai CMD va chay BAT.' }
-  }
-  Write-Host "Node $v / Git, GitHub CLI, Vercel CLI: OK" -ForegroundColor Green
-}
-function Authenticate {
-  Header '2. DANG NHAP GITHUB + VERCEL'
-  $ghCheck = Try-Native $script:Gh @('auth','status')
-  if ($ghCheck.Code -ne 0) {
-    Write-Host 'Chua dang nhap GitHub CLI, trinh duyet se yeu cau ban dang nhap...' -ForegroundColor Yellow
-    Run $script:Gh @('auth','login','--hostname','github.com','--git-protocol','https','--web')
-  }
-  Run $script:Gh @('auth','setup-git')
-  $vcCheck = Try-Native $script:Vercel @('whoami')
-  if ($vcCheck.Code -ne 0) {
-    Write-Host 'Chua dang nhap Vercel CLI, trinh duyet se yeu cau ban dang nhap...' -ForegroundColor Yellow
-    Run $script:Vercel @('login')
-  }
-}
-function Protect-Git {
-  Header '3. KIEM TRA AN TOAN GIT'
-  $ignore = Join-Path $ProjectRoot '.gitignore'
-  $content = if (Test-Path $ignore) { [IO.File]::ReadAllText($ignore) } else { '' }
-  $newPatterns = @(
-    '# HEXA: protect private credentials',
-    '.env', '.env.*', '!.env.example', '**/.env', '**/.env.*', '!**/.env.example',
-    '**/service-account.json', '**/*firebase-admin*.json', '**/*serviceAccountKey*.json',
-    '**/*.pem', '**/*.p12', '**/*.pfx', '**/id_rsa',
-    '.vercel/', '**/.vercel/', '**/node_modules/', '**/dist/', '*.zip', '*.7z', '*.rar'
-  )
-  if ($content -notmatch '(?m)^# HEXA: protect private credentials\s*$') {
-    Add-Content -LiteralPath $ignore -Value ([Environment]::NewLine + ($newPatterns -join [Environment]::NewLine)) -Encoding UTF8
-  }
-  Push-Location $ProjectRoot
-  try {
-    $gitCheck = Try-Native $script:Git @('rev-parse','--show-toplevel')
-    if ($gitCheck.Code -eq 0) {
-      $gitTop = [string]($gitCheck.Data | Select-Object -Last 1)
-      if ([IO.Path]::GetFullPath($gitTop.Trim()) -ne [IO.Path]::GetFullPath($ProjectRoot)) {
-        Fail 'Project nam trong mot Git repository khac. Dung lai de tranh push nham repo.'
-      }
-    } else {
-      Run $script:Git @('init','-b','main')
-    }
-    # A previously tracked key may leak even if it is ignored now.
-    $history = @( (Try-Native $script:Git @('log','--all','--name-only','--pretty=format:')).Data )
-    $tracked = @(& $script:Git ls-files)
-    foreach ($p in ($history + $tracked)) {
-      if ($p -and (Is-SecretPath $p)) { Fail "Git history/index da co file nhay cam: $p. Hay xoa khoi lich su va thu hoi khoa truoc khi push." }
-    }
-    $branch = (& $script:Git branch --show-current | Select-Object -Last 1)
-    if ($branch -and $branch.Trim() -ne 'main') {
-      Fail "Nhanh Git hien tai la '$branch', script chi push main. Hay doi sang main truoc khi deploy."
-    }
-    Run $script:Git @('add','-A')
-    $staged = @(& $script:Git diff --cached --name-only)
-    foreach ($p in $staged) {
-      if ($p -and (Is-SecretPath $p)) { Run $script:Git @('reset'); Fail "Chan push vi file nhay cam: $p" }
-    }
-    & $script:Git diff --cached --quiet
-    if ($LASTEXITCODE -ne 0) {
-      $author = (& $script:Git config user.name)
-      $email = (& $script:Git config user.email)
-      if (-not $author -or -not $email) {
-        # Configure local (not global) Git author with GitHub's private noreply address.
-        $login = (& $script:Gh api user --jq '.login' | Select-Object -Last 1).Trim()
-        $userId = (& $script:Gh api user --jq '.id' | Select-Object -Last 1).Trim()
-        if (-not $login -or $userId -notmatch '^\d+$') { Fail 'Khong lay duoc GitHub login/id de cau hinh Git author.' }
-        if (-not $author) { Run $script:Git @('config','--local','user.name',$login) }
-        if (-not $email) { Run $script:Git @('config','--local','user.email',"$userId+$login@users.noreply.github.com") }
-        Write-Host 'Da tu cau hinh Git author (GitHub noreply) chi cho repo nay.'
-      }
-      Run $script:Git @('commit','-m','Deploy HEXA ticket + asset to Vercel')
-    } else {
-      Write-Host 'Khong co thay doi Git moi.'
-    }
-  } finally { Pop-Location }
-}
-function Is-SecretPath([string]$p) {
-  $p = $p.Replace('\','/')
-  if ($p -match '(?i)(^|/)(\.env(?:\..*)?|service-account\.json|id_rsa)$' -and $p -notmatch '(?i)(^|/)\.env\.example$') { return $true }
-  if ($p -match '(?i)(^|/)[^/]*(?:firebase-admin|serviceaccountkey)[^/]*\.json$') { return $true }
-  if ($p -match '(?i)\.(pem|p12|pfx|zip|7z|rar)$') { return $true }
-  if ($p -match '(?i)(^|/)(\.vercel|node_modules|dist)/') { return $true }
+  $name = $parts[-1]
+  if ($name -match '^\.env($|\.)' -and $name -ne '.env.example') { return $true }
+  if ($name -match '(?i)(service[-_]?account|firebase[-_]?admin|serviceAccountKey)') { return $true }
+  if ($name -match '(?i)(\.pem|\.p12|\.pfx|\.key|\.zip|\.7z|\.rar|\.log)$') { return $true }
+  if ($name -match '(?i)\.bak-|^\.env\.local$') { return $true }
+  if ($name -match '(?i)^(\.npmrc|\.pypirc|\.netrc|credentials\.json|token\.json|id_rsa)$') { return $true }
   return $false
 }
-function Push-GitHub {
-  Header '4. GIT PUSH -> PRIVATE GITHUB'
-  Push-Location $ProjectRoot
-  try {
-    $owner = (& $script:Gh api user --jq '.login' | Select-Object -Last 1).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $owner) { Fail 'Khong lay duoc tai khoan GitHub.' }
-    $full = "$owner/$RepoName"
-    $remoteCheck = Try-Native $script:Git @('remote','get-url','origin')
-    if ($remoteCheck.Code -eq 0) {
-      $origin = [string]($remoteCheck.Data | Select-Object -Last 1)
-      if ($origin -notmatch '(?i)github\.com[:/].+/ticket-asset-hexa(?:\.git)?$') {
-        Fail "Origin dang tro toi repo khac: $origin. Khong tu dong ghi de."
+# Only output paths that must NEVER be committed. This is intentionally separate
+# from the copy filter: it checks the actual Git index and reports precise names.
+# IMPORTANT: .env.example is a harmless template and MUST be allowed.
+function Get-BlockedGitPaths([string[]]$paths) {
+  foreach ($rawPath in $paths) {
+    if ($null -eq $rawPath) { continue }
+    $rel = ([string]$rawPath).Trim().Replace('\', '/')
+    if ($rel.Length -eq 0) { continue }
+    $parts = @($rel -split '/')
+    $file = $parts[$parts.Length - 1]
+    if ($file -ieq '.env.example') { continue }
+
+    $blocked = $false
+    if ($file -match '(?i)^\.env($|\.)') { $blocked = $true }
+    if ($file -match '(?i)(service[-_]?account|firebase[-_]?admin|serviceAccountKey)') { $blocked = $true }
+    if ($file -match '(?i)(\.pem|\.p12|\.pfx|\.key|\.zip|\.7z|\.rar|\.log)$') { $blocked = $true }
+    if ($file -match '(?i)^(\.npmrc|\.pypirc|\.netrc|credentials\.json|token\.json|id_rsa)$') { $blocked = $true }
+    foreach ($part in $parts) {
+      if ($part -in @('node_modules','.vercel','dist','coverage','build','.next','.git','.ssh','.aws')) {
+        $blocked = $true
       }
-    } else {
-      $repoCheck = Try-Native $script:Gh @('repo','view',$full,'--json','name')
-      if ($repoCheck.Code -eq 0) {
-        Run $script:Git @('remote','add','origin',"https://github.com/$full.git")
-      } else {
-        Run $script:Gh @('repo','create',$full,'--private','--source',$ProjectRoot,'--remote','origin')
-      }
     }
-    # Confirm it is private; do not change an existing public repository automatically.
-    $visibility = (& $script:Gh repo view $full --json visibility --jq '.visibility' | Select-Object -Last 1).Trim()
-    if ($LASTEXITCODE -ne 0 -or $visibility -notin @('PRIVATE','private')) {
-      Fail "Repo $full khong PRIVATE. Dung lai de tranh lo ma nguon."
-    }
-    # No --force: refuse to overwrite work on GitHub.
-    Run $script:Git @('push','-u','origin','HEAD:main')
-    Write-Host "Da push private repo: https://github.com/$full" -ForegroundColor Green
-  } finally { Pop-Location }
-}
-function Link-Project([string]$directory,[string]$name) {
-  Push-Location $directory
-  try {
-    Write-Host "Lien ket Vercel Project: $name"
-    Run $script:Vercel @('link','--yes','--project',$name)
-    $linked = Join-Path $directory '.vercel/project.json'
-    if (-not (Test-Path $linked)) { Fail "Vercel CLI chua tao lien ket o $directory. Kiem tra thong bao phia tren." }
-  } finally { Pop-Location }
-}
-function Set-VercelEnv([string]$directory,[string]$key,[string]$value,[bool]$sensitive=$false) {
-  if ([string]::IsNullOrWhiteSpace($value)) { return }
-  if ($value -match '\r|\n') { Fail "Bien $key co xuong dong, khong the nhap tu dong an toan." }
-  Push-Location $directory
-  try {
-    # Vercel CLI 2026 requires an explicit Config/Secret type.
-    # VITE_* values are bundled into browser JavaScript, so they MUST be Config.
-    # Backend credential values stay Secret and are never exposed as VITE_*.
-    if ($key.StartsWith('VITE_') -and $sensitive) {
-      Fail "Khong the dat $key lam Secret: ten VITE_ se duoc nhung vao bundle frontend."
-    }
-    $type = if ($sensitive) { 'secret' } else { 'config' }
-    $envArgs = @('env','add',$key,'--environment','production','--type',$type,'--force')
-    # Send the value only through stdin. Never echo secrets or use --build-env CLI args.
-    $value | & $script:Vercel @envArgs
-    if ($LASTEXITCODE -ne 0) { Fail "Khong the cap nhat bien Vercel $key. Kiem tra quyen Vercel/plan." }
-  } finally { Pop-Location }
-}
-function Deploy-Vercel([string]$directory,[string]$name) {
-  Push-Location $directory
-  try {
-    Header "DEPLOY $name"
-    $lines = @(& $script:Vercel deploy --prod --yes --no-color)
-    $result = $LASTEXITCODE
-    foreach ($line in $lines) { if ($line) { Write-Host $line } }
-    if ($result -ne 0) { Fail "Vercel deploy $name that bai (exit $result)." }
-    $url = ''
-    foreach ($line in $lines) {
-      $m = [regex]::Matches([string]$line,'https://[A-Za-z0-9][A-Za-z0-9.-]*\.vercel\.app(?:/[^\s]*)?')
-      foreach ($mm in $m) { $url = $mm.Value.TrimEnd('/').Split('?')[0] }
-    }
-    if (-not $url) {
-      Fail "Vercel deploy hoan thanh nhung khong lay duoc URL project $name tu terminal. Dung lai de tranh ghi sai VITE_API_URL."
-    }
-    return $url
-  } finally { Pop-Location }
-}
-function Deploy-Cloud {
-  Header '5. DEPLOY NODE API TREN VERCEL'
-  $backendDir = Join-Path $ProjectRoot 'backend'
-  $frontendDir = Join-Path $ProjectRoot 'frontend'
-  $backEnv = Read-DotEnv (Join-Path $backendDir '.env')
-  $frontEnv = Read-DotEnv (Join-Path $frontendDir '.env')
-  foreach ($key in @('FIREBASE_PROJECT_ID','FIREBASE_DATABASE_URL')) {
-    if (-not $backEnv[$key]) { Fail "backend/.env thieu $key" }
+    if ($blocked) { Write-Output $rel }
   }
-  foreach ($key in @('VITE_FIREBASE_API_KEY','VITE_FIREBASE_AUTH_DOMAIN','VITE_FIREBASE_PROJECT_ID','VITE_FIREBASE_APP_ID','VITE_FIREBASE_DATABASE_URL')) {
-    if (-not $frontEnv[$key] -or $frontEnv[$key] -match '^(API_KEY_CUA_BAN|DIEN_|your-|your_-)') { Fail "frontend/.env chua co gia tri that: $key" }
-  }
-  $keyfile = Join-Path $backendDir 'service-account.json'
-  $keyJson = Get-Content -LiteralPath $keyfile -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ($keyJson.project_id -ne $backEnv['FIREBASE_PROJECT_ID']) { Fail 'FIREBASE_PROJECT_ID khong khop voi service-account.json.' }
-  $key64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($keyfile))
+}
 
-  Link-Project $backendDir $BackendName
-  Set-VercelEnv $backendDir 'FIREBASE_PROJECT_ID' $backEnv['FIREBASE_PROJECT_ID']
-  Set-VercelEnv $backendDir 'FIREBASE_DATABASE_URL' $backEnv['FIREBASE_DATABASE_URL']
-  Set-VercelEnv $backendDir 'FIREBASE_SERVICE_ACCOUNT_BASE64' $key64 $true
-  Set-VercelEnv $backendDir 'CLIENT_ORIGINS' "https://$FrontendName.vercel.app"
-  # Optional email notifications - never print SMTP_PASSWORD.
-  foreach ($k in @('SMTP_HOST','SMTP_PORT','SMTP_SECURE','SMTP_USER','SMTP_PASSWORD','SMTP_FROM','IT_NOTIFICATION_EMAILS')) {
-    if ($backEnv.ContainsKey($k) -and $backEnv[$k]) {
-      Set-VercelEnv $backendDir $k $backEnv[$k] ($k -eq 'SMTP_PASSWORD')
+function Copy-SafeProject([string]$from, [string]$to) {
+  foreach ($folder in @('frontend','backend','firebase','docs')) {
+    $source = Join-Path $from $folder
+    if (-not (Test-Path -LiteralPath $source)) { continue }
+    foreach ($item in Get-ChildItem -LiteralPath $source -Force -File -Recurse) {
+      $relative = $item.FullName.Substring($from.Length).TrimStart([char]92,[char]47)
+      if (Is-Excluded $relative) { continue }
+      $dest = Join-Path $to $relative
+      $destDir = Split-Path -Parent $dest
+      if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+      Copy-Item -LiteralPath $item.FullName -Destination $dest -Force
     }
   }
-  $apiUrl = Deploy-Vercel $backendDir $BackendName
-  if ($apiUrl -notmatch '^https://') { Fail 'API Vercel URL khong hop le.' }
-  Write-Host "API URL: $apiUrl" -ForegroundColor Green
-
-  Header '6. DEPLOY REACT FRONTEND TREN VERCEL'
-  Link-Project $frontendDir $FrontendName
-  foreach ($k in @('VITE_FIREBASE_API_KEY','VITE_FIREBASE_AUTH_DOMAIN','VITE_FIREBASE_PROJECT_ID','VITE_FIREBASE_APP_ID','VITE_FIREBASE_DATABASE_URL')) {
-    Set-VercelEnv $frontendDir $k $frontEnv[$k]
+  foreach ($name in @('.gitignore','README.md','DEPLOY_TICKET_ASSET_HEXA.bat','DEPLOY_TICKET_ASSET_HEXA.ps1','HUONG_DAN_DEPLOY.md')) {
+    $source = Join-Path $from $name
+    if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination (Join-Path $to $name) -Force }
   }
-  Set-VercelEnv $frontendDir 'VITE_API_URL' $apiUrl
-  $webUrl = Deploy-Vercel $frontendDir $FrontendName
-  Write-Host "WEB URL: $webUrl" -ForegroundColor Green
-
-  Header '7. CAP NHAT CORS CHO VERCEL WEB'
-  $origins = "$($webUrl.TrimEnd('/')),https://$FrontendName.vercel.app"
-  Set-VercelEnv $backendDir 'CLIENT_ORIGINS' $origins
-  $apiUrl = Deploy-Vercel $backendDir $BackendName
-
-  Write-Host "`n=== WEBSITE: $webUrl ===" -ForegroundColor Green
-  Write-Host "=== API:     $apiUrl ===" -ForegroundColor Green
-  try {
-    $health = Invoke-RestMethod -Uri ($apiUrl.TrimEnd('/') + '/api/health') -TimeoutSec 25
-    if ($health.ok -eq $true) { Write-Host 'API health: OK' -ForegroundColor Green }
-    else { Write-Host 'API health khong tra ok=true; xem Vercel API logs.' -ForegroundColor Yellow }
-  } catch { Write-Host "Khong the xac nhan API health. Kiem tra URL/Logs: $($_.Exception.Message)" -ForegroundColor Yellow }
-  $webHost = ([Uri]$webUrl).Host
-  Write-Host "`nCAN LAM THEM: Firebase Console > Authentication > Settings > Authorized domains > them domain $webHost" -ForegroundColor Yellow
+  $gitignore = Join-Path $to '.gitignore'
+  Add-Content -LiteralPath $gitignore -Encoding UTF8 -Value "`n.env`n.env.*`n!.env.example`n**/.env`n**/.env.*`n!**/.env.example`n**/service-account.json`n**/*firebase-admin*.json`n**/*serviceAccountKey*.json`n**/node_modules/`n**/.vercel/`n**/dist/`n"
 }
-function Optional-Functions {
-  if (-not (Test-Path (Join-Path $ProjectRoot 'firebase/functions/index.js'))) { return }
-  Header '8. LICH TU PHAN CONG/NHAC VIEC (TUY CHON)'
-  Write-Host 'Firebase Cloud Functions can goi Blaze va co the phat sinh phi.' -ForegroundColor Yellow
-  $ans = Read-Host 'Ban co muon deploy Cloud Functions lap lich ngay bay gio? (y/N)'
-  if ($ans -notin @('y','Y','yes','YES')) { Write-Host 'Bo qua Cloud Functions. Website/API van online, nhung lich auto 5 phut/nhac viec CHUA duoc bat tren cloud.' -ForegroundColor Yellow; return }
-  $script:Firebase = Find-Command @('firebase.cmd','firebase')
-  if (-not $script:Firebase) {
-    Run $script:Npm @('install','--global','firebase-tools')
-    $script:Firebase = Find-Command @('firebase.cmd','firebase')
-    if (-not $script:Firebase) {
-      $npmPrefix = (& $script:Npm 'prefix' '--global' | Select-Object -Last 1).Trim()
-      if (Test-Path (Join-Path $npmPrefix 'firebase.cmd')) { $script:Firebase = Join-Path $npmPrefix 'firebase.cmd' }
-    }
-    if (-not $script:Firebase) { Fail 'Khong tim thay firebase CLI. Mo lai Terminal.' }
+function Set-VercelVariable([string]$key, [string]$value, [string]$kind) {
+  if ([string]::IsNullOrWhiteSpace($value)) { throw "Bien moi truong $key dang trong." }
+  # Supply value through stdin, never as a command line argument or printed in terminal.
+  $temp = Join-Path $env:TEMP ('hexa-env-' + [guid]::NewGuid().ToString('N') + '.txt')
+  try {
+    [IO.File]::WriteAllText($temp, $value, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Cau hinh Vercel: $key ($kind)"
+    $command = 'vercel env add ' + $key + ' production --type ' + $kind + ' --force --yes < "' + $temp + '"'
+    & cmd.exe /d /c $command
+    if ($LASTEXITCODE -ne 0) { throw "Vercel khong cap nhat duoc: $key" }
+  } finally {
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
   }
-  & $script:Firebase projects:list 1>$null 2>$null
-  if ($LASTEXITCODE -ne 0) { Run $script:Firebase @('login') }
-  $functions = Join-Path $ProjectRoot 'firebase/functions'
-  Push-Location $functions
-  try { Run $script:Npm @('install') } finally { Pop-Location }
-  Push-Location (Join-Path $ProjectRoot 'firebase')
-  try { Run $script:Firebase @('deploy','--only','functions','--project','tickethexaa') }
+}
+function Link-Vercel([string]$dir, [string]$name) {
+  Push-Location $dir
+  try { Run 'vercel' @('link','--yes','--project',$name,'--scope',$VercelScope,'--no-color') }
   finally { Pop-Location }
-  Write-Host 'Cloud scheduler da deploy. Dong backend local de tranh lich chay trung.' -ForegroundColor Green
 }
-
+function Check-Api([string]$url) {
+  try {
+    $res = Invoke-WebRequest -Uri ($url.TrimEnd('/') + '/api/health') -UseBasicParsing -TimeoutSec 35 -MaximumRedirection 3
+    $data = $res.Content | ConvertFrom-Json
+    Write-Host ('API HTTP ' + [int]$res.StatusCode + ', ok=' + $data.ok)
+    if ([int]$res.StatusCode -ne 200 -or $data.ok -ne $true) { throw 'Health check khong tra ve ok:true.' }
+  } catch {
+    $httpStatus = 'unknown'
+    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+      $httpStatus = [int]$_.Exception.Response.StatusCode
+    }
+    Write-Host ('API health FAILED. HTTP: ' + $httpStatus) -ForegroundColor Red
+    Write-Host ('URL: ' + $url + '/api/health')
+    Write-Host 'HTTP 404: kiem tra backend/index.js va Vercel Root Directory.'
+    Write-Host 'HTTP 401/403: kiem tra Vercel Deployment Protection (Production).'
+    Write-Host 'HTTP 500: xem Vercel Functions logs / service account / env.'
+    throw
+  }
+}
 try {
-  Header 'HEXA TICKET + ASSET / ONE-CLICK GITHUB + VERCEL'
-  Require-Files
-  Setup-Tools
-  Authenticate
-  Protect-Git
-  Push-GitHub
-  Deploy-Cloud
-  Optional-Functions
-  Write-Host "`nDONE. Website project: $FrontendName / API project: $BackendName" -ForegroundColor Green
-  exit 0
+  Step '0. Kiem tra project va cong cu'
+  foreach ($path in @('frontend/package.json','backend/package.json','backend/index.js','backend/service-account.json','frontend/.env','backend/.env')) {
+    if (-not (Test-Path (Join-Path $Root $path))) { throw "Thieu $path trong thu muc $Root" }
+  }
+  Require 'git' 'Cai Git for Windows: https://git-scm.com/downloads/win'
+  Require 'gh' 'Cai GitHub CLI: winget install --id GitHub.cli -e'
+  Require 'node' 'Cai Node.js 22+'; Require 'npm' 'Cai npm'
+  if (-not (Get-Command vercel -ErrorAction SilentlyContinue)) {
+    Step 'Cai Vercel CLI'
+    Run 'npm' @('install','-g','vercel@latest')
+  }
+  $backendEnv = Read-Env (Join-Path $Root 'backend/.env')
+  $frontendEnv = Read-Env (Join-Path $Root 'frontend/.env')
+  $accountPath = Join-Path $Root 'backend/service-account.json'
+  $serviceRaw = [IO.File]::ReadAllBytes($accountPath)
+  $serviceAccount = ([Text.Encoding]::UTF8.GetString($serviceRaw) | ConvertFrom-Json)
+  if (-not $serviceAccount.project_id -or -not $serviceAccount.private_key) { throw 'Firebase Service Account JSON khong hop le.' }
+  if ($backendEnv.FIREBASE_PROJECT_ID -ne $serviceAccount.project_id) { throw 'FIREBASE_PROJECT_ID khong khop Service Account.' }
+  foreach ($key in @('VITE_FIREBASE_API_KEY','VITE_FIREBASE_AUTH_DOMAIN','VITE_FIREBASE_PROJECT_ID','VITE_FIREBASE_APP_ID','VITE_FIREBASE_DATABASE_URL')) {
+    if (-not $frontendEnv[$key] -or $frontendEnv[$key] -match '(YOUR|DIEN_|123456789:web:abcd)') { throw "Thieu gia tri Firebase Web that: $key" }
+  }
+  if ($frontendEnv.VITE_FIREBASE_PROJECT_ID -ne $backendEnv.FIREBASE_PROJECT_ID) { throw 'Frontend va backend dang dung 2 Firebase project khac nhau.' }
+  if (-not $backendEnv.FIREBASE_DATABASE_URL) { throw 'Thieu FIREBASE_DATABASE_URL.' }
+
+  Step '1. Kiem tra logic backend va build React local'
+  Push-Location (Join-Path $Root 'backend')
+  try { Run 'npm' @('ci'); Run 'npm' @('test'); Run 'node' @('--check','index.js') }
+  finally { Pop-Location }
+  Push-Location (Join-Path $Root 'frontend')
+  try { Run 'npm' @('ci'); Run 'npm' @('run','build') }
+  finally { Pop-Location }
+
+  Step '2. Dang nhap GitHub / Vercel'
+  & cmd.exe /d /c 'gh auth status >NUL 2>NUL'
+  if ($LASTEXITCODE -ne 0) { Run 'gh' @('auth','login','--web','--git-protocol','https') }
+  Run 'gh' @('auth','setup-git')
+  & cmd.exe /d /c 'vercel whoami --no-color >NUL 2>NUL'
+  if ($LASTEXITCODE -ne 0) { Run 'vercel' @('login') }
+  $owner = ((& gh api user --jq '.login') | Out-String).Trim()
+  $id = ((& gh api user --jq '.id') | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $owner) { throw 'Khong lay duoc tai khoan GitHub.' }
+
+  Step '3. Tao hoac cap nhat GitHub PRIVATE repository'
+  & cmd.exe /d /c ('gh repo view ' + $owner + '/' + $RepoName + ' --json isPrivate >NUL 2>NUL')
+  if ($LASTEXITCODE -ne 0) { Run 'gh' @('repo','create',($owner + '/' + $RepoName),'--private') }
+  $info = ((& gh repo view ($owner + '/' + $RepoName) --json 'isPrivate') | Out-String | ConvertFrom-Json)
+  if (-not $info.isPrivate) { throw 'GITHUB REPO DANG PUBLIC! Khong duoc day ma nguon/credential.' }
+  New-Item -ItemType Directory -Force -Path $Work | Out-Null
+  Run 'git' @('clone',('https://github.com/' + $owner + '/' + $RepoName + '.git'),$Repo)
+  # Reject repositories that already committed credentials. Removing later commits cannot erase their history.
+  $tracked = @(& git -C $Repo ls-files)
+  if ($LASTEXITCODE -ne 0) { throw 'Khong doc duoc danh sach file Git cu.' }
+  $trackedBlocked = @(Get-BlockedGitPaths $tracked)
+  if ($trackedBlocked.Count -gt 0) {
+    Write-Host '[SECURITY] Repo GitHub da theo doi cac file khong duoc push:' -ForegroundColor Red
+    $trackedBlocked | ForEach-Object { Write-Host ('  - ' + $_) -ForegroundColor Red }
+    throw 'GitHub repo cu dang track credential. KHONG push. Can xoa credential khoi history va thu hoi key neu da lo.'
+  }
+  Get-ChildItem -LiteralPath $Repo -Force | Where-Object { $_.Name -ne '.git' } | Remove-Item -Recurse -Force
+  Copy-SafeProject $Root $Repo
+  Run 'git' @('-C',$Repo,'config','user.name',$owner)
+  Run 'git' @('-C',$Repo,'config','user.email',($id + '+' + $owner + '@users.noreply.github.com'))
+  # LF/CRLF warnings from Git are informational, not fatal.
+  # .gitattributes also keeps JS/CSS files consistent across Windows/Linux.
+  $attrs = Join-Path $Repo '.gitattributes'
+  [IO.File]::WriteAllText($attrs, "* text=auto`n*.js text eol=lf`n*.jsx text eol=lf`n*.json text eol=lf`n*.css text eol=lf`n*.sh text eol=lf`n*.bat text eol=crlf`n*.ps1 text eol=crlf`n", (New-Object System.Text.UTF8Encoding($false)))
+  Run 'git' @('-C',$Repo,'add','-A')
+  $staged = @(& git -C $Repo diff --cached --name-only)
+  if ($LASTEXITCODE -ne 0) { throw 'Khong doc duoc Git staging.' }
+  Write-Host ('Git staging: ' + $staged.Count + ' files. Dang kiem tra duong dan nhay cam...')
+  $blocked = @(Get-BlockedGitPaths $staged)
+  if ($blocked.Count -gt 0) {
+    Write-Host '[SECURITY] Danh sach file bi chan:' -ForegroundColor Red
+    $blocked | ForEach-Object { Write-Host ('  - ' + $_) -ForegroundColor Red }
+    throw 'Phat hien file nhay cam trong Git staging. KHONG push. Kiem tra danh sach o tren.'
+  }
+  Write-Host '[OK] Git staging an toan; .env.example, .vercelignore va source code duoc cho phep.' -ForegroundColor Green
+  # Safety net: scan staged files for an actual PEM private key block (not just a source-code variable name).
+  foreach ($rel in $staged) {
+    $p = Join-Path $Repo $rel
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
+    $info = Get-Item -LiteralPath $p
+    if ($info.Length -gt 1048576) { continue }
+    $raw = [IO.File]::ReadAllText($p)
+    if ($raw -match '-----BEGIN (?:RSA )?PRIVATE KEY-----?
+[A-Za-z0-9+/=]{16,}') {
+      throw ('[SECURITY] File co noi dung private key: ' + $rel + '. Khong push.')
+    }
+  }
+  & git -C $Repo diff --cached --quiet
+  if ($LASTEXITCODE -ne 0) { Run 'git' @('-C',$Repo,'commit','-m','HEXA: rebuild Express API and robust React deployment') }
+  Run 'git' @('-C',$Repo,'push','-u','origin','HEAD')
+  Write-Host ('GITHUB: https://github.com/' + $owner + '/' + $RepoName) -ForegroundColor Green
+
+  Step ('4. Vercel backend Express - project ' + $ApiProject)
+  $apiDir = Join-Path $Repo 'backend'
+  Link-Vercel $apiDir $ApiProject
+  Push-Location $apiDir
+  try {
+    Set-VercelVariable 'NODE_ENV' 'production' 'config'
+    Set-VercelVariable 'FIREBASE_PROJECT_ID' $backendEnv.FIREBASE_PROJECT_ID 'config'
+    Set-VercelVariable 'FIREBASE_DATABASE_URL' $backendEnv.FIREBASE_DATABASE_URL 'config'
+    Set-VercelVariable 'FIREBASE_SERVICE_ACCOUNT_BASE64' ([Convert]::ToBase64String($serviceRaw)) 'secret'
+    Set-VercelVariable 'CLIENT_ORIGINS' $WebDomain 'config'
+    foreach ($key in @('SMTP_HOST','SMTP_PORT','SMTP_SECURE','SMTP_USER','SMTP_PASSWORD','SMTP_FROM','IT_NOTIFICATION_EMAILS')) {
+      if ($backendEnv.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($backendEnv[$key])) {
+        $kind = if ($key -eq 'SMTP_PASSWORD' -or $key -eq 'SMTP_USER') { 'secret' } else { 'config' }
+        Set-VercelVariable $key $backendEnv[$key] $kind
+      }
+    }
+    Run 'vercel' @('deploy','--prod','--yes','--no-color')
+  } finally { Pop-Location }
+  Step '5. Kiem tra API production truoc khi deploy frontend'
+  Check-Api $ApiDomain
+
+  Step '6. Deploy frontend React/Vite'
+  $webDir = Join-Path $Repo 'frontend'
+  Link-Vercel $webDir $FrontendProject
+  Push-Location $webDir
+  try {
+    foreach ($key in @('VITE_FIREBASE_API_KEY','VITE_FIREBASE_AUTH_DOMAIN','VITE_FIREBASE_PROJECT_ID','VITE_FIREBASE_APP_ID','VITE_FIREBASE_DATABASE_URL')) {
+      Set-VercelVariable $key $frontendEnv[$key] 'config'
+    }
+    Set-VercelVariable 'VITE_API_URL' $ApiDomain 'config'
+    Run 'vercel' @('deploy','--prod','--yes','--no-color')
+  } finally { Pop-Location }
+  Write-Host "`nHOAN TAT" -ForegroundColor Green
+  Write-Host ('Website: ' + $WebDomain + '/it')
+  Write-Host ('API: ' + $ApiDomain + '/api/health')
+  Write-Host ('Git: https://github.com/' + $owner + '/' + $RepoName)
+  Write-Host 'Firebase Authentication > Authorized domains: them ticket-asset-hexa.vercel.app neu chua co.'
+  Write-Host 'Can Cloud Functions (Firebase Blaze) de tu dong giao viec/nhac viec khi tat may Windows.'
+  Write-Host 'Bat dau kiem tra tu /it va 250 tai san hien co. Du lieu Firebase khong bi xoa.'
 } catch {
   Write-Host "`n[DEPLOY FAILED] $($_.Exception.Message)" -ForegroundColor Red
+  Write-Host ('Thu muc tam de xem lai: ' + $Work)
+  Write-Host 'Neu API 404/500: Vercel > ticket-asset-hexa-api > Logs va Settings > Root Directory.'
   exit 1
 }

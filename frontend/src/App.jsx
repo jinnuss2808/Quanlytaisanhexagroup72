@@ -233,7 +233,7 @@ function RequesterTickets({ uid }) {
   const [review, setReview] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const reloadTickets = () => api('/requester/tickets').then(setTickets).catch(err => setError(err.message));
+  const reloadTickets = () => api('/requester/tickets').then(rows => { if (!Array.isArray(rows)) throw new Error('API người yêu cầu trả về dữ liệu không phải danh sách.'); setTickets(rows); }).catch(err => setError(err.message));
   useEffect(() => {
     reloadTickets(); // Backend API still works when the RTDB client listener is not available.
     const requesterUid = uid || auth.currentUser?.uid;
@@ -347,6 +347,11 @@ function Dashboard({ user, onLogout }) {
       const requests = [api('/tickets'), api('/notifications')];
       if (user.role === 'manager') requests.push(api('/users'));
       const [t, n, u] = await Promise.all(requests);
+      // Backend/Vercel may return an error object or non-array payload.
+      // Never place it into a list state: doing so crashes React with "filter is not a function".
+      if (!Array.isArray(t) || !Array.isArray(n) || (u !== undefined && !Array.isArray(u))) {
+        throw new Error('API trả về dữ liệu không đúng cấu trúc. Hãy kiểm tra backend /api/tickets và /api/notifications trên Vercel.');
+      }
       setTickets(t); setNotifications(n); if (u) setUsers(u);
       setError('');
     } catch (err) { setError(err.message); }
@@ -384,8 +389,8 @@ function Dashboard({ user, onLogout }) {
     else setSection(key);
     setSidebarOpen(false);
   };
-  const unread = notifications.filter(n => !n.read).length;
-  const active = tickets.filter(t => ['new','in_progress','on_hold'].includes(t.status));
+  const unread = (Array.isArray(notifications) ? notifications : []).filter(n => !n.read).length;
+  const active = (Array.isArray(tickets) ? tickets : []).filter(t => ['new','in_progress','on_hold'].includes(t.status));
   const onUpdated = async () => { await refresh(true); };
   const current = selected ? tickets.find(t => t.id === selected.id) || selected : null;
   const isManager = user.role === 'manager';
@@ -925,7 +930,7 @@ function CompletionReport({ user }) {
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(href), 1000);
   };
-  const maxCompleted = Math.max(1, ...(report?.months || []).map(row => row.completed));
+  const maxCompleted = Math.max(1, ...(Array.isArray(report?.months) ? report.months : []).map(row => row.completed));
   const years = Array.from({ length: 8 }, (_, i) => today.getFullYear() - i);
   return <div className="reports-view">
     <div className="report-toolbar dash-panel">
@@ -979,23 +984,7 @@ function CompletionReport({ user }) {
   </div>;
 }
 
-class HexaErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error, info) { console.error('[HEXA REACT CRASH]', error, info); }
-  render() {
-    if (!this.state.error) return this.props.children;
-    const message = String(this.state.error?.message || 'Unknown React error').slice(0, 350);
-    return <main style={{fontFamily:'Arial,sans-serif', maxWidth:650, margin:'10vh auto', padding:26, background:'#fff', border:'1px solid #e1e8f3', borderRadius:12, color:'#182b4b'}}>
-      <h2 style={{marginTop:0}}>HEXA gặp lỗi giao diện</h2>
-      <p>Ứng dụng không còn hiển thị màn hình trắng. Hãy sao chép mã lỗi dưới đây và gửi bộ phận IT.</p>
-      <pre style={{whiteSpace:'pre-wrap', padding:14, background:'#f1f4fa', borderRadius:8}}>{message}</pre>
-      <button onClick={() => window.location.reload()} style={{padding:'10px 18px', color:'#fff', background:'#2867e8', border:0, borderRadius:8, cursor:'pointer'}}>Tải lại trang</button>
-    </main>;
-  }
-}
-
-function HexaApp() {
+export default function App() {
   const isIT = window.location.pathname === '/it' || window.location.pathname.startsWith('/it/');
   const assetPublicId = window.location.pathname.match(/^\/assets\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
   const [firebaseUser, setFirebaseUser] = useState(undefined);
@@ -1015,8 +1004,4 @@ function HexaApp() {
   if (!firebaseUser) return <><LoginPage/>{authError && <div className="auth-toast">{authError}</div>}</>;
   if (!profile) return <Spinner label="Đang xác thực quyền truy cập..."/>;
   return <Dashboard user={profile} onLogout={() => signOut(auth)}/>;
-}
-
-export default function App() {
-  return <HexaErrorBoundary><HexaApp/></HexaErrorBoundary>;
 }
