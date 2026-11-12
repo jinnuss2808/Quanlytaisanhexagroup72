@@ -1,0 +1,19 @@
+{
+  "name": "hexa-unified-scheduled-jobs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "firebase-functions": "^6.4.0",
+    "firebase-admin": "^13.6.0",
+    "nodemailer": "^7.0.6",
+    "dotenv": "^16.6.1"
+  }
+}
