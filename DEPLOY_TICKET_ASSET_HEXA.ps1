@@ -236,8 +236,14 @@ function Set-VercelEnv([string]$directory,[string]$key,[string]$value,[bool]$sen
   if ($value -match '\r|\n') { Fail "Bien $key co xuong dong, khong the nhap tu dong an toan." }
   Push-Location $directory
   try {
-    $envArgs = @('env','add',$key,'production','--force')
-    if ($sensitive) { $envArgs += '--sensitive' }
+    # Vercel CLI 2026 requires an explicit Config/Secret type.
+    # VITE_* values are bundled into browser JavaScript, so they MUST be Config.
+    # Backend credential values stay Secret and are never exposed as VITE_*.
+    if ($key.StartsWith('VITE_') -and $sensitive) {
+      Fail "Khong the dat $key lam Secret: ten VITE_ se duoc nhung vao bundle frontend."
+    }
+    $type = if ($sensitive) { 'secret' } else { 'config' }
+    $envArgs = @('env','add',$key,'--environment','production','--type',$type,'--force')
     # Send the value only through stdin. Never echo secrets or use --build-env CLI args.
     $value | & $script:Vercel @envArgs
     if ($LASTEXITCODE -ne 0) { Fail "Khong the cap nhat bien Vercel $key. Kiem tra quyen Vercel/plan." }
