@@ -979,7 +979,23 @@ function CompletionReport({ user }) {
   </div>;
 }
 
-export default function App() {
+class HexaErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[HEXA REACT CRASH]', error, info); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const message = String(this.state.error?.message || 'Unknown React error').slice(0, 350);
+    return <main style={{fontFamily:'Arial,sans-serif', maxWidth:650, margin:'10vh auto', padding:26, background:'#fff', border:'1px solid #e1e8f3', borderRadius:12, color:'#182b4b'}}>
+      <h2 style={{marginTop:0}}>HEXA gặp lỗi giao diện</h2>
+      <p>Ứng dụng không còn hiển thị màn hình trắng. Hãy sao chép mã lỗi dưới đây và gửi bộ phận IT.</p>
+      <pre style={{whiteSpace:'pre-wrap', padding:14, background:'#f1f4fa', borderRadius:8}}>{message}</pre>
+      <button onClick={() => window.location.reload()} style={{padding:'10px 18px', color:'#fff', background:'#2867e8', border:0, borderRadius:8, cursor:'pointer'}}>Tải lại trang</button>
+    </main>;
+  }
+}
+
+function HexaApp() {
   const isIT = window.location.pathname === '/it' || window.location.pathname.startsWith('/it/');
   const assetPublicId = window.location.pathname.match(/^\/assets\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
   const [firebaseUser, setFirebaseUser] = useState(undefined);
@@ -999,4 +1015,8 @@ export default function App() {
   if (!firebaseUser) return <><LoginPage/>{authError && <div className="auth-toast">{authError}</div>}</>;
   if (!profile) return <Spinner label="Đang xác thực quyền truy cập..."/>;
   return <Dashboard user={profile} onLogout={() => signOut(auth)}/>;
+}
+
+export default function App() {
+  return <HexaErrorBoundary><HexaApp/></HexaErrorBoundary>;
 }
