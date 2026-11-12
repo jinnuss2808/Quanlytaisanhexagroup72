@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import './asset-management.css';
 import WarehouseManagement from './WarehouseManagement.jsx';
+import PrinterManagement from './PrinterManagement.jsx';
 import QRCode from 'qrcode';
 
 const BASE = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:4000').replace(/\/$/, '');
@@ -278,7 +279,7 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   const restore=async item=>{try{await api(`/assets/${item.id}/restore`,{method:'POST'});await refresh();}catch(err){setError(err.message);}};
   const xlsx=async()=>{try{download(await rawRequest('/assets/export.xlsx',{blob:true}),`DanhSachTaiSan_HEXA_${new Date().toISOString().slice(0,10)}.xlsx`);}catch(err){setError(err.message);}};
   useEffect(()=>{if(initialTicket){setMode('assets');setEditing({...initialAsset,assetName:initialTicket.itemName||initialTicket.subject,description:`Tham chiếu yêu cầu ${initialTicket.code||initialTicket.id}`});onClearInitialTicket();}},[initialTicket,onClearInitialTicket]);
-  const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['ink','Quản lý mực',Wrench],['stock','Kho linh kiện',HardDrive],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload]]:[])];
+  const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['printers','Quản lý máy in',Wrench],['stock','Kho linh kiện',HardDrive],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload]]:[])];
   return <div className="am-root">
     <div className="am-split am-section-head"><div><p className="am-eyebrow">HEXA · INVENTORY</p><h2>Quản lý tài sản IT</h2><p>Một tài khoản đăng nhập · Dữ liệu tài sản và ticket cùng Firebase</p></div><div className="am-head-actions">{(mode==='assets'||mode==='trash')&&<button onClick={refresh} className="am-btn am-light"><RefreshCw size={16}/> Làm mới</button>}{mode==='assets'&&<button onClick={()=>setEditing(null)} className="am-btn am-primary"><Plus size={16}/> Thêm tài sản</button>}</div></div>
     <div className="am-stats">{[[Boxes,'Tổng tài sản',stats.total], [CheckCircle2,'Có sẵn',stats.available],[Laptop,'Đang sử dụng',stats.using],[Wrench,'Bảo trì',stats.maintenance],[AlertTriangle,'Đã hỏng',stats.broken]].map(([Icon,label,value])=><div key={label} className="am-stat"><div className="am-stat-icon"><Icon size={18}/></div><span>{label}</span><strong>{value}</strong></div>)}</div>
@@ -301,7 +302,8 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
         </tbody></table></div>
       <footer className="am-pagination"><span>{data.total} tài sản · Trang {data.page}/{data.totalPages}</span><div><button disabled={filters.page<=1} onClick={()=>setFilters(f=>({...f,page:f.page-1}))}><ChevronLeft size={17}/></button><button disabled={filters.page>=data.totalPages} onClick={()=>setFilters(f=>({...f,page:f.page+1}))}><ChevronRight size={17}/></button></div></footer>
     </div>}
-    {(mode==='warehouse'||mode==='ink'||mode==='stock')&&<WarehouseManagement kind={mode} refreshEpoch={warehouseRefreshEpoch} onAssignAsset={setAssigning} onShowAsset={setDetail}/>}
+    {(mode==='warehouse'||mode==='stock')&&<WarehouseManagement kind={mode} refreshEpoch={warehouseRefreshEpoch} onAssignAsset={setAssigning} onShowAsset={setDetail}/>}
+    {mode==='printers'&&<PrinterManagement refreshEpoch={warehouseRefreshEpoch}/> }
     {mode==='catalogs'&&isManager&&<CatalogManager catalogs={catalogs} onSaved={reloadCatalogs}/>} 
     {mode==='import'&&isManager&&<ImportPanel onSaved={refresh}/>}
     {editing!==undefined&&<AssetForm item={editing} catalogs={catalogs} onClose={()=>setEditing(undefined)} onSaved={saved}/>}

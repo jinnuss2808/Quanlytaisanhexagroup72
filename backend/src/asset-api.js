@@ -6,6 +6,7 @@ import { transactExistingTicket as conditionalUpdate } from './ticket-transactio
 import { readAssetExcel,writeAssetExcel } from './asset-excel.js';
 import { prepareExcelImport } from './asset-xlsx-import.js';
 import { quantity,stockChange } from './warehouse-core.js';
+import { isPrinterAsset, validatePrinterToner, normalizePrinterDetails } from './printer-core.js';
 
 const router = express.Router();
 const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
@@ -157,6 +158,68 @@ router.post('/import.xlsx',requireManager,express.raw({type:['application/vnd.op
   catch(err){await Promise.all(reserved.map(key=>db.ref('assetCodeIndex/'+key).remove().catch(()=>{})));throw err;}
   res.json({created,skipped,categoriesCreated:plan.newCategories.length,departmentsCreated:plan.newDepartments.length,errors:[]});
 }));
+// Printer fleet is a view over existing asset records; no duplicated device database.
+router.get('/printers',wrap(async(_req,res)=>{
+  const [assets,{cats,depts}]=await Promise.all([obj('assets'),catalogs()]);
+  const items=Object.values(assets).filter(a=>!a.deletedAt)
+    .map(a=>enrichAsset(a,cats,depts)).filter(isPrinterAsset)
+    .sort((a,b)=>String(a.assetCode).localeCompare(String(b.assetCode),'vi'));
+  res.json({items,total:items.length});
+}));
+// Thêm máy in trực tiếp: vẫn là một tài sản dùng chung, tránh tạo hai nguồn dữ liệu.
+router.post('/printers',wrap(async(req,res)=>{
+  const body=req.body||{};
+  const {cats,depts}=await catalogs();
+  const inkId=asText(body.tonerStockItemId,128);
+  let ink=null;
+  if(inkId){
+    validId(inkId);
+    ink=(await db.ref(`warehouseStock/${inkId}`).get()).val();
+    if(!ink||ink.deletedAt||ink.category!=='ink')throw assetError(400,'Loại mực đã chọn không còn trong kho.');
+  }
+  const details=normalizePrinterDetails({...body,tonerType:asText(body.tonerType,120)||ink?.name||''});
+  const categoryId=asText(body.categoryId,128)||Object.entries(cats)
+    .find(([,cat])=>isPrinterAsset({categoryName:cat.name,categoryCode:cat.code}))?.[0]||null;
+  const assetCode=asText(body.assetCode,100)||('PRN-'+assetUUID().replaceAll('-','').slice(0,10).toUpperCase());
+  const data=normalizeAsset({...details,assetCode,categoryId,status:'available',assignedTo:null});
+  await checkCatalog(data);
+  const id='a_'+assetUUID();
+  await reserve(data.assetCode,id);
+  const now=Date.now();
+  const record={...data,id,publicId:assetUUID(),assetType:'printer',isPrinter:true,
+    tonerType:details.tonerType,tonerStockItemId:details.tonerStockItemId,location:details.location,
+    createdAt:now,updatedAt:now,createdBy:req.it.uid};
+  try{await db.ref().update({[`assets/${id}`]:record,[`assetPublicIds/${record.publicId}`]:id});}
+  catch(err){await db.ref('assetCodeIndex/'+keyForCode(data.assetCode)).remove().catch(()=>{});throw err;}
+  await addLog(id,'created',req.it,{summary:`Thêm máy in ${data.assetCode}`,tonerType:details.tonerType});
+  res.status(201).json(enrichAsset(record,cats,depts));
+}));
+
+// Sửa cấu hình máy in, giữ nguyên công ty sở hữu, mã tài sản và lịch sử.
+router.patch('/printers/:id',wrap(async(req,res)=>{
+  const id=validId(req.params.id);
+  const old=await assetById(id);
+  const {cats,depts}=await catalogs();
+  if(!isPrinterAsset(enrichAsset(old,cats,depts)))throw assetError(400,'Tài sản này không phải máy in.');
+  const inkId=asText(req.body?.tonerStockItemId,128);
+  let ink=null;
+  if(inkId){
+    validId(inkId);
+    ink=(await db.ref(`warehouseStock/${inkId}`).get()).val();
+    if(!ink||ink.deletedAt||ink.category!=='ink')throw assetError(400,'Loại mực đã chọn không còn trong kho.');
+  }
+  const details=normalizePrinterDetails({...old,...req.body,tonerType:asText(req.body?.tonerType,120)||ink?.name||old.tonerType||''});
+  if(details.ownerDepartmentId!==old.ownerDepartmentId && req.it.role!=='manager')
+    throw assetError(403,'Chỉ Admin được thay đổi công ty sở hữu.');
+  await checkCatalog({...old,...details});
+  const updated=await edited(id,current=>{
+    if(current.updatedAt!==old.updatedAt)throw assetError(409,'Máy in vừa được nhân viên khác cập nhật.');
+    return {...current,...details,isPrinter:true,assetType:'printer',updatedAt:Date.now()};
+  });
+  await addLog(id,'updated',req.it,{summary:'Cập nhật thông tin máy in'});
+  res.json(enrichAsset(updated,cats,depts));
+}));
+
 router.get('/',wrap(async(req,res)=>{
   const [items,{cats,depts}]=await Promise.all([obj('assets'),catalogs()]);
   res.json(selectAssets(Object.values(items).map(x=>enrichAsset(x,cats,depts)),req.query));
@@ -243,6 +306,52 @@ router.get('/:id/history',wrap(async(req,res)=>{
   const [history,assignments,maintenance]=await Promise.all([obj(`assetHistory/${id}`),obj(`assetAssignments/${id}`),obj(`assetMaintenance/${id}`)]);
   res.json({history:array(history).sort((a,b)=>b.at-a.at),assignments:array(assignments).sort((a,b)=>b.assignedAt-a.assignedAt),maintenance:array(maintenance).sort((a,b)=>b.at-a.at)});
 }));
+// Record an exactly-one-toner printer refill, with an idempotent inventory movement.
+// An operationId repeated after an interrupted request will never decrement twice.
+router.post('/:id/printer/toner',wrap(async(req,res)=>{
+  const id=validId(req.params.id);
+  const raw=await assetById(id), {cats,depts}=await catalogs();
+  const printer=enrichAsset(raw,cats,depts);
+  const operationId=asText(req.body?.operationId,100);
+  const stockItemId=asText(req.body?.stockItemId,128);
+  const movementId='printer_toner_'+operationId;
+  const eventId='pt_'+operationId;
+  const eventRef=db.ref(`assetMaintenance/${id}/${eventId}`);
+  const done=(await eventRef.get()).val();
+  if(done) return res.json({ok:true,alreadyProcessed:true,event:done});
+  const stockRef=db.ref(`warehouseStock/${validId(stockItemId)}`);
+  const stock=(await stockRef.get()).val();
+  const input=validatePrinterToner({printer,stock,stockItemId,operationId,notes:req.body?.notes});
+  const date=asText(req.body?.date,10)||new Date().toISOString().slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw assetError(400,'Ngày đổ mực không hợp lệ.');
+  const now=Date.now();
+  const tx=await conditionalUpdate(stockRef,old=>{
+    if(!old || old.category!=='ink' || old.deletedAt) throw assetError(409,'Loại mực đã bị thay đổi trong kho.');
+    if(old.movements?.[movementId] && old.movements[movementId].assetId !== id) {
+      throw assetError(409,'Mã thao tác đã được dùng cho máy in khác.');
+    }
+    return stockChange(old,{type:'issue',amount:1,recipient:`Đổ mực máy in ${printer.assetCode}`,
+      reason:'Đổ mực máy in '+printer.assetCode,assetId:id,performedBy:req.it.name||req.it.email,
+      date,opId:movementId});
+  });
+  if(!tx.committed) throw assetError(409,'Không cập nhật được tồn kho, vui lòng thử lại.');
+  const current=tx.snapshot.val();
+  if(!current.movements?.[movementId]) throw assetError(409,'Không tìm thấy phiếu xuất mực.');
+  // This multi-path write is idempotent and can be retried using the same operationId.
+  const event={id:eventId,type:'replace_toner',summary:`Đổ 1 ${current.unit||'hộp'} ${current.name}`,
+    notes:input.notes,date,cost:Number(current.unitPrice||0),performedBy:req.it.name||req.it.email,
+    byUid:req.it.uid,byName:req.it.name||req.it.email,at:now,
+    stockItemId,stockSku:current.sku,stockName:current.name,stockQuantity:1,
+    inventoryOperationId:movementId};
+  const logId='pr_'+operationId;
+  await db.ref().update({
+    [`assetMaintenance/${id}/${eventId}`]:event,
+    [`assetHistory/${id}/${logId}`]:{id:logId,action:'replace_toner',summary:event.summary,
+      byUid:req.it.uid,byName:req.it.name||req.it.email,at:now,maintenanceId:eventId}
+  });
+  res.status(201).json({ok:true,stockRemaining:current.quantity,event});
+}));
+
 // Lịch sử sửa chữa, bảo trì, thay linh kiện, sửa máy in và thay mực.
 router.post('/:id/maintenance',wrap(async(req,res)=>{
   const id=validId(req.params.id),item=await assetById(id);

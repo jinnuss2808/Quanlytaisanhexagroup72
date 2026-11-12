@@ -1,18 +1,4 @@
-node_modules/
-dist/
-.env
-.env.local
-.env.*.local
-*.log
-*.json.key
-*service-account*.json
-.DS_Store
-.vercel/
-# Never commit Firebase Admin private keys.
-*firebase-admin*.json
-*serviceAccountKey*.json
-
-# HEXA: protect private credentials
+# Local configuration & Firebase credentials: NEVER commit them
 .env
 .env.*
 !.env.example
@@ -26,24 +12,22 @@ dist/
 **/*.p12
 **/*.pfx
 **/id_rsa
-.vercel/
-**/.vercel/
+**/.npmrc
+**/.netrc
+# Builds, packages and tool state
 **/node_modules/
 **/dist/
+**/.vercel/
+.hexa-deploy-backup/
+.hexa-backups/
+HEXA_BACKUP_*/
+patch/
+*.log
 *.zip
 *.7z
 *.rar
+.DS_Store
 
-.env
-.env.*
-!.env.example
-**/.env
-**/.env.*
-!**/.env.example
-**/service-account.json
-**/*firebase-admin*.json
-**/*serviceAccountKey*.json
-**/node_modules/
-**/.vercel/
-**/dist/
+# HEXA deploy safety rules
+*.pem
 

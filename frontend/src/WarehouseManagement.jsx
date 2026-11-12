@@ -14,10 +14,10 @@ function StockEditor({item,kind,onClose,onSaved}){
  const submit=async e=>{e.preventDefault();setError('');setWorking(true);try{
   await api(edit?`/warehouse/${item.id}`:'/warehouse',{method:edit?'PATCH':'POST',body:form});onSaved();
  }catch(err){setError(err.message)}finally{setWorking(false)}};
- return <Dialog title={edit?'Sửa mặt hàng trong kho':'Thêm hàng vào kho'} onClose={onClose}><form className="am-form" onSubmit={submit}>
- <div className="am-form-grid"><Input title="Mã hàng *"><input required maxLength={100} disabled={edit} value={form.sku} onChange={e=>field('sku',e.target.value)}/></Input>
- <Input title="Tên thiết bị / mực *"><input required maxLength={255} value={form.name} onChange={e=>field('name',e.target.value)}/></Input>
- <Input title="Phân loại"><select value={form.category} onChange={e=>field('category',e.target.value)}>{Object.entries(CATEGORIES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></Input>
+ return <Dialog title={kind==='ink'?(edit?'Sửa mực trong kho':'Thêm mực vào kho'):(edit?'Sửa mặt hàng trong kho':'Thêm hàng vào kho')} onClose={onClose}><form className="am-form" onSubmit={submit}>
+ <div className="am-form-grid"><Input title={kind==='ink'?'Mã mực *':'Mã hàng *'}><input required maxLength={100} disabled={edit} value={form.sku} onChange={e=>field('sku',e.target.value)}/></Input>
+ <Input title={kind==='ink'?'Tên mực *':'Tên thiết bị / mực *'}><input required maxLength={255} value={form.name} onChange={e=>field('name',e.target.value)}/></Input>
+ <Input title="Phân loại"><select value={form.category} onChange={e=>field('category',e.target.value)}>{Object.entries(CATEGORIES).filter(([k])=>kind!=='ink'||k==='ink').map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></Input>
  <Input title="Đơn vị tính"><input value={form.unit} onChange={e=>field('unit',e.target.value)}/></Input>
  {!edit&&<Input title="Số lượng đầu kỳ"><input type="number" min="0" step="1" value={form.quantity} onChange={e=>field('quantity',e.target.value)}/></Input>}
  <Input title="Ngưỡng cảnh báo tồn"><input type="number" min="0" step="1" value={form.minQuantity} onChange={e=>field('minQuantity',e.target.value)}/></Input>
@@ -53,23 +53,28 @@ function StockHistory({item,onClose}){
  {rows.map(m=><div className="am-event" key={m.id}><History size={16}/><div><b>{labelAction[m.type]||m.type}: {m.delta>0?'+':''}{m.delta} {item.unit}</b><p>{fmt(m.at)} · {m.performedBy||'Hệ thống'} · Tồn: {m.before} → {m.after}</p><small>{m.recipient?'Người nhận: '+m.recipient+' · ':''}{m.reason||''}</small></div></div>)}
  </div></Dialog>
 }
-export default function WarehouseManagement({kind='warehouse',onAssignAsset,onShowAsset,refreshEpoch=0}){
+export default function WarehouseManagement({kind='warehouse',onAssignAsset,onShowAsset,refreshEpoch=0,embedded=false,openCreateSignal=0}){
  const [stock,setStock]=useState({items:[],total:0,alerts:0}),[devices,setDevices]=useState([]),[term,setTerm]=useState(''),[category,setCategory]=useState('all');
  const [devicePage,setDevicePage]=useState(1),[devicePages,setDevicePages]=useState(1),[deviceTotal,setDeviceTotal]=useState(0),[debouncedSearch,setDebouncedSearch]=useState('');
  const [editor,setEditor]=useState(undefined),[transaction,setTransaction]=useState(null),[history,setHistory]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const reload=useCallback(async()=>{setLoading(true);try{
   const [list,assets]=await Promise.all([api('/warehouse'),kind==='warehouse'?api(`/assets?status=available&pageSize=50&page=${devicePage}&search=${encodeURIComponent(debouncedSearch)}`):Promise.resolve({items:[]})]);
-  setStock(list);setDevices(assets.items||[]);setDevicePages(assets.totalPages||1);setDeviceTotal(assets.total||0);setError('');
+  setStock({...list,items:Array.isArray(list?.items)?list.items:[]});setDevices(Array.isArray(assets?.items)?assets.items:[]);setDevicePages(assets.totalPages||1);setDeviceTotal(assets.total||0);setError('');
  }catch(err){setError(err.message)}finally{setLoading(false)}},[kind,devicePage,debouncedSearch]);
  useEffect(()=>{const t=setTimeout(()=>{setDebouncedSearch(term);setDevicePage(1);},300);return()=>clearTimeout(t);},[term]);
  useEffect(()=>{reload()},[reload,refreshEpoch]);
- const onlyInk=kind==='ink',stocked=useMemo(()=>stock.items.filter(x=>(onlyInk?x.category==='ink':kind==='warehouse'?x.category!=='ink':true)
-    &&(category==='all'||x.category===category)&&(!term||[x.sku,x.name,x.location,x.owner].some(v=>String(v||'').toLocaleLowerCase('vi').includes(term.toLocaleLowerCase('vi'))))),[stock.items,kind,category,term]);
+ // Nút Thêm mực ở thanh công cụ chung mở biểu mẫu kho mực.
+ useEffect(()=>{if(kind==='ink'&&openCreateSignal>0)setEditor(null)},[kind,openCreateSignal]);
+ const onlyInk=kind==='ink',safeItems=Array.isArray(stock?.items)?stock.items:[],stocked=useMemo(()=>safeItems.filter(x=>(onlyInk?x.category==='ink':kind==='warehouse'?x.category!=='ink':true)
+    &&(category==='all'||x.category===category)&&(!term||[x.sku,x.name,x.location,x.owner].some(v=>String(v||'').toLocaleLowerCase('vi').includes(term.toLocaleLowerCase('vi'))))),[safeItems,kind,category,term]);
+ const summaryInk=safeItems.filter(x=>x.category==='ink');
+ const visibleTotal=onlyInk?summaryInk.length:stock.total;
+ const visibleAlerts=onlyInk?summaryInk.filter(x=>x.quantity<=x.minQuantity).length:stock.alerts;
  const listed=devices;
  const saved=()=>{setEditor(undefined);setTransaction(null);reload()};
  return <div className="am-warehouse">
- <div className="am-split am-heading"><div><h3>{onlyInk?'Quản lý mực in':kind==='warehouse'?'Kho thiết bị IT':'Kho vật tư và linh kiện'}</h3><p>Quản lý số lượng tồn, nhập xuất cấp phát và lịch sử từng vật tư</p></div><div className="am-head-actions"><button className="am-btn am-light" onClick={reload}><RefreshCw size={15}/>Làm mới</button><button className="am-btn am-primary" onClick={()=>setEditor(null)}><Plus size={15}/>Thêm hàng</button></div></div>
- <div className="am-warehouse-summary"><div><Boxes size={18}/> {stock.total} mã vật tư</div><div><AlertTriangle size={18}/> {stock.alerts} mã cần nhập thêm</div></div>
+ {!embedded&&<div className="am-split am-heading"><div><h3>{onlyInk?'Quản lý mực in':kind==='warehouse'?'Kho thiết bị IT':'Kho vật tư và linh kiện'}</h3><p>Quản lý số lượng tồn, nhập xuất cấp phát và lịch sử từng vật tư</p></div><div className="am-head-actions"><button className="am-btn am-light" onClick={reload}><RefreshCw size={15}/>Làm mới</button><button className="am-btn am-primary" onClick={()=>setEditor(null)}><Plus size={15}/>{onlyInk?'Thêm mực':'Thêm hàng'}</button></div></div>}
+ <div className="am-warehouse-summary"><div><Boxes size={18}/> {visibleTotal} mã {onlyInk?'mực':'vật tư'}</div><div><AlertTriangle size={18}/> {visibleAlerts} mã cần nhập thêm</div></div>
  <div className="am-filter-bar am-warehouse-filter"><div className="am-search"><Search size={16}/><input placeholder="Tìm mã, tên vật tư, vị trí kho..." value={term} onChange={e=>setTerm(e.target.value)}/></div>
  {!onlyInk&&<select value={category} onChange={e=>setCategory(e.target.value)}><option value="all">Tất cả nhóm</option>{Object.entries(CATEGORIES).filter(([k])=>kind==='warehouse'?k!=='ink':true).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select>}
  </div>
@@ -79,7 +84,7 @@ export default function WarehouseManagement({kind='warehouse',onAssignAsset,onSh
  {listed.map(item=><tr key={item.id}><td><button className="am-link" onClick={()=>onShowAsset(item)}>{item.assetCode}</button></td><td><b>{item.assetName}</b></td><td>{item.categoryName||'—'}</td><td>{item.ownerDepartmentName||'—'}</td><td><button className="am-btn am-primary" onClick={()=>onAssignAsset(item)}><ArrowRightLeft size={14}/> Cấp phát</button></td></tr>)}
  {!listed.length&&<tr><td colSpan={5} className="am-empty">Chưa có tài sản sẵn sàng cấp phát.</td></tr>}
  </tbody></table></div><div className="am-pagination"><span>{deviceTotal} thiết bị · Trang {devicePage}/{devicePages}</span><div><button disabled={devicePage<=1} onClick={()=>setDevicePage(p=>p-1)}>‹</button><button disabled={devicePage>=devicePages} onClick={()=>setDevicePage(p=>p+1)}>›</button></div></div></div>}
- <div className="am-card"><div className="am-padded"><h3>{onlyInk?'Danh sách mực in':'Vật tư quản lý theo số lượng'}</h3><p className="am-muted">Chuột, bàn phím, linh kiện, mực in... được ghi nhận tồn kho và lịch sử xuất cấp phát.</p></div>
+ <div className="am-card"><div className="am-padded"><h3>{onlyInk?'Danh sách mực in':'Vật tư quản lý theo số lượng'}</h3><p className="am-muted">{onlyInk?'Tồn kho mực theo mã, kèm lịch sử nhập, xuất và sử dụng cho máy in.':'Chuột, bàn phím, linh kiện, mực in... được ghi nhận tồn kho và lịch sử xuất cấp phát.'}</p></div>
  <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã kho</th><th>Tên hàng</th><th>Loại</th><th>Tồn kho</th><th>Vị trí / Công ty</th><th>Thao tác</th></tr></thead><tbody>
  {stocked.map(item=><tr key={item.id}><td><b>{item.sku}</b></td><td>{item.name}</td><td>{CATEGORIES[item.category]||item.category}</td><td><span className={item.quantity<=item.minQuantity?'am-stock-low':'am-stock-good'}>{item.quantity} {item.unit}</span>{item.quantity<=item.minQuantity&&<small>Cần nhập thêm</small>}</td><td>{item.location||'—'}<small>{item.owner||''}</small></td><td><div className="am-warehouse-actions"><button className="am-btn am-primary" onClick={()=>setTransaction(item)}><ArrowRightLeft size={14}/>Nhập/Xuất</button><button className="am-icon-btn" title="Lịch sử xuất kho" onClick={()=>setHistory(item)}><History size={16}/></button><button className="am-icon-btn" title="Sửa mặt hàng" onClick={()=>setEditor(item)}><Save size={15}/></button></div></td></tr>)}
  {!stocked.length&&<tr><td colSpan={6} className="am-empty">{loading?'Đang tải dữ liệu...':'Chưa có hàng tồn trong nhóm này.'}</td></tr>}

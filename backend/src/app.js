@@ -5,14 +5,15 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { db, adminAuth, ServerValue } from './firebase.js';
-import { TYPE, STATUS, ACTIVE_STATUS, PRIORITY, DEADLINE_MS, isValidEmail,
+import { TYPE, STATUS, ACTIVE_STATUS, DEADLINE_MS, isValidEmail,
   normalizeText, statusDelta, entriesToArray, newestFirst, computeWorkloads, computeCurrentAssignmentCounts } from './core.js';
 import { notifyNewTicket, notifyPeople } from './notify.js';
 import { reminderInterval } from './reminder-core.js';
 import { createReport, yearMonth } from './report.js';
 import { transactExistingTicket } from './ticket-transaction.js';
-import { vietnamDate, validDate, onLeave, chooseReplacement } from './workflow.js';
-import { validateRequesterEmail, validateRequesterPassword, validateRequesterProfile, isRequesterEnabled, canRequesterConfirm } from './requester-account.js';
+import { vietnamDate, validDate } from './workflow.js';
+import { applySharedTicketStatus } from './shared-ticket.js';
+import { validateRequesterEmail, validateRequesterPassword, validateRequesterProfile, isRequesterEnabled, canRequesterConfirm, requesterLevel } from './requester-account.js';
 import { isITRole, mustKeepAnotherManager, countOtherManagers } from './admin-roles.js';
 
 const app = express();
@@ -61,7 +62,7 @@ function requireManager(req, _res, next) {
   if (req.it.role !== 'manager') return next(new HttpError(403, 'Chỉ quản lý được sử dụng chức năng này.'));
   next();
 }
-function canAccess(ticket, it) { return it.role === 'manager' || ticket.assignedTo === it.uid; }
+function canAccess(_ticket, it) { return it.active === true && ['agent', 'manager'].includes(it.role); }
 async function requireSignedIn(req, _res, next) {
   try {
     const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
@@ -98,7 +99,8 @@ function sanitizeTicketInput(body) {
   const subject = normalizeText(body.subject, 160);
   const description = normalizeText(body.description, 3000);
   const contact = normalizeText(body.contact, 100);
-  const priority = PRIORITY.includes(body.priority) ? body.priority : 'normal';
+  // New public tickets have no user-selected priority.
+  const priority = 'normal';
   const itemName = normalizeText(body.itemName, 120);
   const quantity = Number(body.quantity || 1);
   if (!TYPE.includes(type)) fail(400, 'Loại yêu cầu không hợp lệ.');
@@ -135,7 +137,9 @@ app.post('/api/requester/register', requireSignedIn, asyncRoute(async (req, res)
   const authUser = await adminAuth.getUser(req.identity.uid);
   if (!authUser.email || authUser.disabled) fail(403, 'Tài khoản không hợp lệ hoặc đã bị khóa.');
   const path = db.ref(`requesters/${req.identity.uid}`);
-  const initial = { ...profile, email: authUser.email, active: true, createdAt: Date.now() };
+  const wanted = requesterLevel(req.body?.jobLevel);
+  const initial = { ...profile, email: authUser.email, active: true, createdAt: Date.now(),
+    jobLevel: 'employee', requestedJobLevel: wanted, jobLevelApproved: wanted !== 'manager' };
   await path.transaction(old => old || initial, undefined, false);
   const saved = (await path.get()).val();
   if (!isRequesterEnabled(saved)) fail(403, 'Tài khoản đã bị quản lý khóa.');
@@ -155,7 +159,9 @@ app.post('/api/requesters', requireIT, requireManager, asyncRoute(async (req, re
   let created;
   try { created = await adminAuth.createUser({ email, password, displayName: profile.name, emailVerified: false }); }
   catch (err) { if (err.code === 'auth/email-already-exists') fail(409, 'Email đã được đăng ký.'); throw err; }
-  const person = { ...profile, email, active: true, createdAt: Date.now(), createdByAdmin: true };
+  const jobLevel = requesterLevel(req.body?.jobLevel);
+  const person = { ...profile, email, active: true, createdAt: Date.now(), createdByAdmin: true,
+    jobLevel, requestedJobLevel: jobLevel, jobLevelApproved: true };
   try { await db.ref(`requesters/${created.uid}`).set(person); }
   catch (err) { await adminAuth.deleteUser(created.uid).catch(console.error); throw err; }
   res.status(201).json({ uid: created.uid, ...person });
@@ -174,7 +180,9 @@ app.patch('/api/requesters/:uid', requireIT, requireManager, asyncRoute(async (r
   try { await adminAuth.updateUser(uid, { email, displayName: profile.name, disabled: !active }); }
   catch (err) { if (err.code === 'auth/email-already-exists') fail(409, 'Email đã được đăng ký.'); throw err; }
   if (!active || old.email !== email) await adminAuth.revokeRefreshTokens(uid);
-  const updated = { ...old, ...profile, email, active, updatedAt: Date.now() };
+  const jobLevel = requesterLevel(req.body?.jobLevel ?? old.jobLevel);
+  const updated = { ...old, ...profile, email, active, jobLevel,
+    requestedJobLevel: jobLevel, jobLevelApproved: true, updatedAt: Date.now() };
   await path.set(updated);
   res.json({ uid, ...updated });
 }));
@@ -262,9 +270,10 @@ app.post('/api/public/tickets', publicLimiter, asyncRoute(async (req, res) => {
   const activityId = db.ref(`activities/${ticketRef.key}`).push().key;
   const now = Date.now();
   const ticket = { ...input, ...(requester ? { requesterUid: requester.uid, requesterName: requester.name,
-    department: requester.department, position: requester.position, contact: requester.contact, email: requester.email } : {}),
+    department: requester.department, position: requester.position, contact: requester.contact, email: requester.email,
+    requesterJobLevel: requester.jobLevel, requesterLevelApproved: requester.jobLevelApproved === true } : {}),
     id: ticketRef.key, code, status: 'new', assignedTo: null, assignedToName: null,
-    assignmentMethod: null, assignedAt: null, createdAt: now, updatedAt: now, assignmentDeadline: now + DEADLINE_MS,
+    assignmentMethod: null, assignedAt: null, createdAt: now, updatedAt: now, assignmentDeadline: null,
     nextReminderAt: now + reminderInterval(input.type), lastReminderAt: null, reminderCount: 0,
     completedAt: null, completedBy: null, completedByName: null };
   await db.ref().update({
@@ -278,12 +287,10 @@ app.post('/api/public/tickets', publicLimiter, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/me', requireIT, (req, res) => res.json(req.it));
-app.get('/api/tickets', requireIT, asyncRoute(async (req, res) => {
-  const ref = db.ref('tickets');
-  const snap = req.it.role === 'manager'
-    ? await ref.orderByChild('createdAt').limitToLast(200).get()
-    : await ref.orderByChild('assignedTo').equalTo(req.it.uid).get();
-  res.json(entriesToArray(snap.val()).sort(newestFirst).slice(0, 200));
+app.get('/api/tickets', requireIT, asyncRoute(async (_req, res) => {
+  // Shared queue for every active IT account, including Admin.
+  const snap = await db.ref('tickets').get();
+  res.json(entriesToArray(snap.val()).sort(newestFirst));
 }));
 app.get('/api/tickets/:id/activities', requireIT, asyncRoute(async (req, res) => {
   const path = itemPath('tickets', req.params.id);
@@ -322,185 +329,58 @@ app.patch('/api/tickets/:id/status', requireIT, asyncRoute(async (req, res) => {
   const requesterMode = await readWorkflow();
   let requesterCanConfirm = false;
   if (newStatus === 'closed' && requesterMode) {
-    const existingTicket = (await db.ref(path).get()).val();
-    if (existingTicket?.requesterUid) {
-      const requesterProfile = (await db.ref(`requesters/${existingTicket.requesterUid}`).get()).val();
-      requesterCanConfirm = canRequesterConfirm(requesterProfile, requesterMode);
+    const old = (await db.ref(path).get()).val();
+    if (old?.requesterUid) {
+      const p = (await db.ref(`requesters/${old.requesterUid}`).get()).val();
+      requesterCanConfirm = canRequesterConfirm(p, requesterMode);
     }
   }
   const result = await transactExistingTicket(db.ref(path), ticket => {
-    if (!ticket || !canAccess(ticket, req.it) || ticket.status === newStatus) return;
-    // Newly assigned agents must accept before changing status.
-    if (req.it.role === 'agent' && ticket.assignmentDecision === 'pending') return;
-    // For authenticated requester tickets, the requester exclusively confirms/ closes.
-    if (newStatus === 'closed' && ticket.requesterUid && requesterCanConfirm) return;
+    if (!ticket) return;
+    const next = applySharedTicketStatus(ticket, newStatus, req.it, now, requesterCanConfirm);
+    if (!next) return;
+    if (ACTIVE_STATUS.has(newStatus) && !next.nextReminderAt) next.nextReminderAt = now + reminderInterval(ticket.type);
     before = { ...ticket };
-    const after = { ...ticket, status: newStatus, updatedAt: now };
-    if (!ACTIVE_STATUS.has(newStatus) && !ticket.assignedTo) after.assignmentDeadline = null;
-    if (ACTIVE_STATUS.has(newStatus) && !ticket.assignedTo && !ticket.assignmentDeadline) {
-      after.assignmentDeadline = now + DEADLINE_MS;
-    }
-    // One completion per ticket: resolving then closing does not count twice.
-    if (!ACTIVE_STATUS.has(newStatus)) {
-      after.nextReminderAt = null;
-      if (ACTIVE_STATUS.has(ticket.status) || !ticket.completedAt) {
-        after.completedAt = now;
-        after.completedBy = ticket.assignedTo || req.it.uid;
-        after.completedByName = ticket.assignedToName || req.it.name;
-      }
-    } else if (!ACTIVE_STATUS.has(ticket.status)) {
-      // Reopening cancels the old completion and starts a new reminder cycle.
-      after.completedAt = null;
-      after.completedBy = null;
-      after.completedByName = null;
-      after.nextReminderAt = now + reminderInterval(ticket.type);
-    } else if (!ticket.nextReminderAt) {
-      after.nextReminderAt = now + reminderInterval(ticket.type);
-    }
-    return after;
-  });
-  if (!result.committed) {
-    const value = (await db.ref(path).get()).val();
-    if (!value) fail(404, 'Không tìm thấy yêu cầu.');
-    if (!canAccess(value, req.it)) fail(403, 'Không có quyền đổi trạng thái.');
-    if (req.it.role === 'agent' && value.assignmentDecision === 'pending') fail(409, 'Bạn cần tiếp nhận ticket trước.');
-    if (newStatus === 'closed' && value.requesterUid && requesterCanConfirm) fail(409, 'Người yêu cầu phải xác nhận hoàn thành và đóng ticket.');
-    return res.json({ ok: true, changed: false });
-  }
-  const ticket = result.snapshot.val();
-  const diff = statusDelta(before.status, newStatus);
-  const activityId = db.ref(`activities/${req.params.id}`).push().key;
-  const updates = {
-    [`activities/${req.params.id}/${activityId}`]: { action: 'status_changed', actorId: req.it.uid,
-      actorName: req.it.name, detail: `${before.status} → ${newStatus}`, createdAt: now },
-  };
-  if (ticket.assignedTo && diff) updates[`users/${ticket.assignedTo}/activeTickets`] = ServerValue.increment(diff);
-  await db.ref().update(updates);
-  if (ticket.assignedTo) {
-    try { await notifyPeople([ticket.assignedTo], req.params.id, `Cập nhật trạng thái · ${ticket.code}`, `Trạng thái mới: ${newStatus}`); }
-    catch (err) { console.error('[notification] status:', err); }
-  }
-  res.json({ ok: true, changed: true });
-}));
-app.patch('/api/tickets/:id/assign', requireIT, requireManager, asyncRoute(async (req, res) => {
-  const newUid = normalizeText(req.body?.uid, 128);
-  if (!newUid || !/^[a-zA-Z0-9_-]{1,128}$/.test(newUid)) fail(400, 'Vui lòng chọn nhân viên hợp lệ.');
-  const targetUser = (await db.ref(`users/${newUid}`).get()).val();
-  if (!targetUser || targetUser.role !== 'agent' || targetUser.active !== true) fail(400, 'Nhân viên không hợp lệ hoặc bị khóa.');
-  if (onLeave(targetUser)) fail(409, 'Nhân viên đang trong ngày nghỉ, không thể giao ticket.');
-  const path = itemPath('tickets', req.params.id);
-  let before;
-  const now = Date.now();
-  const result = await transactExistingTicket(db.ref(path), ticket => {
-    if (!ticket || ticket.assignedTo === newUid) return;
-    before = { ...ticket };
-    return { ...ticket, assignedTo: newUid, assignedToName: targetUser.name,
-      assignmentMethod: 'manual', assignmentDecision: 'pending', acceptedAt: null,
-      assignedAt: now, assignmentDeadline: null, updatedAt: now };
+    return next;
   });
   if (!result.committed) {
     const latest = (await db.ref(path).get()).val();
     if (!latest) fail(404, 'Không tìm thấy yêu cầu.');
-    if (latest.assignedTo !== newUid) fail(409, 'Ticket vừa được thay đổi. Vui lòng thử giao việc lại.');
-    return res.json({ ok: true, changed: false });
+    if (latest.status === newStatus) {
+      if (!ACTIVE_STATUS.has(newStatus) && latest.completedBy && latest.completedBy !== req.it.uid) {
+        fail(409, `Ticket đã được ${latest.completedByName || 'nhân viên khác'} hoàn thành.`);
+      }
+      return res.json({ ok:true, changed:false, completedBy:latest.completedBy || null });
+    }
+    if (newStatus === 'closed' && requesterCanConfirm && latest.requesterUid) fail(409, 'Người yêu cầu phải xác nhận đóng ticket.');
+    if (!ACTIVE_STATUS.has(latest.status) && ACTIVE_STATUS.has(newStatus) && req.it.role !== 'manager') {
+      fail(403, 'Chỉ Admin có thể mở lại ticket đã hoàn thành.');
+    }
+    fail(409, 'Trạng thái ticket vừa thay đổi. Vui lòng tải lại.');
   }
   const ticket = result.snapshot.val();
   const activityId = db.ref(`activities/${req.params.id}`).push().key;
-  const updates = {
-    [`users/${newUid}/totalAssigned`]: ServerValue.increment(1),
-    [`activities/${req.params.id}/${activityId}`]: { action: 'manual_assigned', actorId: req.it.uid,
-      actorName: req.it.name, detail: `Đã giao cho ${targetUser.name}`, createdAt: now },
-  };
-  if (ACTIVE_STATUS.has(ticket.status)) {
-    updates[`users/${newUid}/activeTickets`] = ServerValue.increment(1);
-    if (before.assignedTo) updates[`users/${before.assignedTo}/activeTickets`] = ServerValue.increment(-1);
-  }
-  await db.ref().update(updates);
-  try { await notifyPeople([newUid], req.params.id, `Quản lý giao việc · ${ticket.code}`, 'Bạn đã được quản lý phân công một yêu cầu.'); }
-  catch (err) { console.error('[notification] assign:', err); }
-  res.json({ ok: true, changed: true });
-}));
-
-// An assigned agent must choose to accept or reject (legacy pre-upgrade assignments remain usable).
-app.post('/api/tickets/:id/decision', requireIT, asyncRoute(async (req, res) => {
-  if (req.it.role !== 'agent') fail(403, 'Chỉ nhân viên được giao mới phản hồi ticket.');
-  const decision = req.body?.decision;
-  if (!['accept', 'reject'].includes(decision)) fail(400, 'Phản hồi không hợp lệ.');
-  const reason = normalizeText(req.body?.reason, 500);
-  const path = itemPath('tickets', req.params.id);
-  const now = Date.now();
-  // Only reject once per assignment, never return to an agent who has rejected this ticket.
-  const [snap, usersSnap, ticketsSnap] = await Promise.all([
-    db.ref(path).get(), db.ref('users').get(), db.ref('tickets').get()
-  ]);
-  const old = snap.val();
-  if (!old || old.assignedTo !== req.it.uid || !ACTIVE_STATUS.has(old.status)) {
-    fail(409, 'Ticket đã được giao cho người khác hoặc đã hoàn thành.');
-  }
-  if (old.assignmentDecision !== 'pending') fail(409, 'Ticket này đã được phản hồi hoặc đã tiếp nhận từ trước.');
-  if (decision === 'accept') {
-    const done = await transactExistingTicket(db.ref(path), ticket => {
-      if (!ticket || ticket.assignedTo !== req.it.uid || ticket.assignmentDecision !== 'pending'
-          || !ACTIVE_STATUS.has(ticket.status)) return;
-      return { ...ticket, assignmentDecision: 'accepted', acceptedAt: now,
-        status: ticket.status === 'new' ? 'in_progress' : ticket.status, updatedAt: now };
-    });
-    if (!done.committed) fail(409, 'Ticket đã thay đổi, vui lòng làm mới.');
-    const actId = db.ref(`activities/${req.params.id}`).push().key;
-    await db.ref(`activities/${req.params.id}/${actId}`).set({ action: 'accepted', actorId: req.it.uid,
-      actorName: req.it.name, detail: 'Nhân viên đã tiếp nhận công việc', createdAt: now });
-    const managers = Object.entries(usersSnap.val() || {}).filter(([, u]) => u.role === 'manager' && u.active === true).map(([uid]) => uid);
-    try { await notifyPeople(managers, req.params.id, `Đã tiếp nhận · ${old.code}`, `${req.it.name} đã tiếp nhận xử lý ticket.`); }
-    catch (err) { console.error('[decision] accept notify:', err); }
-    res.json({ ok: true, reassigned: false });
-    return;
-  }
-
-  const users = usersSnap.val() || {};
-  const tickets = entriesToArray(ticketsSnap.val());
-  const excluded = { ...(old.rejectedBy || {}), [req.it.uid]: true };
-  const historical = computeCurrentAssignmentCounts(tickets);
-  const next = chooseReplacement(users, tickets, excluded, historical);
-  const result = await transactExistingTicket(db.ref(path), ticket => {
-    if (!ticket || ticket.assignedTo !== req.it.uid || ticket.assignmentDecision !== 'pending'
-        || !ACTIVE_STATUS.has(ticket.status)) return;
-    const rejectedBy = { ...(ticket.rejectedBy || {}), [req.it.uid]: true };
-    // Re-evaluate exclusion to guard against a stale preference.
-    const replacement = next && !rejectedBy[next.uid] ? next : null;
-    return { ...ticket, rejectedBy, assignedTo: replacement?.uid || null,
-      assignedToName: replacement?.name || null,
-      assignmentMethod: replacement ? 'auto_reassign' : null,
-      assignmentDecision: replacement ? 'pending' : null,
-      acceptedAt: null, assignedAt: replacement ? now : null,
-      assignmentDeadline: replacement ? null : now + 60_000, updatedAt: now,
-      status: 'new' };
+  await db.ref(`activities/${req.params.id}/${activityId}`).set({
+    action: ACTIVE_STATUS.has(before.status) && !ACTIVE_STATUS.has(newStatus) ? 'completed' : 'status_changed',
+    actorId:req.it.uid, actorName:req.it.name,
+    detail: ACTIVE_STATUS.has(before.status) && !ACTIVE_STATUS.has(newStatus)
+      ? `${req.it.name} đã hoàn thành ticket (${before.status} → ${newStatus})`
+      : `${before.status} → ${newStatus}`,
+    createdAt:now
   });
-  if (!result.committed) fail(409, 'Ticket đã được phản hồi ở nơi khác.');
-  const updated = result.snapshot.val();
-  const activityId = db.ref(`activities/${req.params.id}`).push().key;
-  const updates = {
-    [`users/${req.it.uid}/activeTickets`]: ServerValue.increment(-1),
-    [`activities/${req.params.id}/${activityId}`]: {
-      action: 'rejected', actorId: req.it.uid, actorName: req.it.name,
-      detail: `${req.it.name} từ chối tiếp nhận` + (reason ? `: ${reason}` : '') +
-        (updated.assignedTo ? `; chuyển cho ${updated.assignedToName}` : '; chuyển về hàng chờ quản lý'),
-      createdAt: now
-    }
-  };
-  if (updated.assignedTo) {
-    updates[`users/${updated.assignedTo}/activeTickets`] = ServerValue.increment(1);
-    updates[`users/${updated.assignedTo}/totalAssigned`] = ServerValue.increment(1);
-  }
-  await db.ref().update(updates);
-  const managers = Object.entries(users).filter(([, u]) => u.role === 'manager' && u.active === true).map(([id]) => id);
   try {
-    await notifyPeople(managers, req.params.id, `Nhân viên từ chối · ${updated.code}`,
-      updated.assignedTo ? `Ticket đã tự chuyển cho ${updated.assignedToName}.` : 'Chưa có nhân viên đủ điều kiện. Vui lòng phân công.');
-    if (updated.assignedTo) await notifyPeople([updated.assignedTo], req.params.id,
-      `Yêu cầu cần tiếp nhận · ${updated.code}`, 'Một đồng nghiệp đã từ chối, ticket được chuyển cho bạn.');
-  } catch (err) { console.error('[decision] notify:', err); }
-  res.json({ ok: true, reassigned: Boolean(updated.assignedTo), assignedTo: updated.assignedTo });
+    const people = (await db.ref('users').get()).val() || {};
+    const targets = Object.entries(people).filter(([, p]) => p.active === true && ['agent','manager'].includes(p.role)).map(([uid])=>uid);
+    await notifyPeople(targets, req.params.id, `Ticket cập nhật · ${ticket.code}`,
+      !ACTIVE_STATUS.has(newStatus) ? `${ticket.completedByName || req.it.name} đã hoàn thành ticket.` : `Trạng thái mới: ${newStatus}`);
+  } catch (err) { console.error('[notifications] status:', err); }
+  res.json({ ok:true, changed:true, completedBy:ticket.completedBy || null });
 }));
+
+// The old individual assignment / accept / reject workflow is retired.
+// Return a clear response to clients that still have a cached old build.
+app.patch('/api/tickets/:id/assign', requireIT, (_req, res) => res.status(410).json({ error:'HEXA đã chuyển sang hàng chờ chung, không còn giao việc.' }));
+app.post('/api/tickets/:id/decision', requireIT, (_req, res) => res.status(410).json({ error:'HEXA không còn yêu cầu Tiếp nhận/Từ chối.' }));
 
 // Leave is self-service and inclusive by Vietnam local date (00:00–23:59 UTC+7).
 app.get('/api/me/leaves', requireIT, asyncRoute(async (req, res) => {
@@ -556,12 +436,14 @@ async function writeAdminAudit(actorUid, action, targetUid, changes = {}) {
 
 app.get('/api/users', requireIT, requireManager, asyncRoute(async (_req, res) => {
   const [people, tickets] = await Promise.all([db.ref('users').get(), db.ref('tickets').get()]);
-  const ticketList = entriesToArray(tickets.val());
-  const workloads = computeWorkloads(ticketList);
-  const assignmentCounts = computeCurrentAssignmentCounts(ticketList);
+  const counts = {};
+  for (const t of entriesToArray(tickets.val())) {
+    if (!['resolved', 'closed'].includes(t.status)) continue;
+    const uid = t.completedBy || t.assignedTo; // historical fallback
+    if (uid) counts[uid] = (counts[uid] || 0) + 1;
+  }
   res.json(Object.entries(people.val() || {}).map(([uid, u]) => ({ ...u, uid,
-    activeTickets: workloads[uid] || 0,
-    totalAssigned: Math.max(Number(u.totalAssigned) || 0, assignmentCounts[uid] || 0) })));
+    completedTickets: counts[uid] || 0 })));
 }));
 app.post('/api/users', requireIT, requireManager, asyncRoute(async (req, res) => {
   const email = normalizeText(req.body?.email, 254).toLowerCase();
@@ -606,10 +488,6 @@ app.patch('/api/users/:uid', requireIT, requireManager, asyncRoute(async (req, r
     await assertManagerSafety(uid, old, role, active);
     const ticketSnap = await db.ref('tickets').orderByChild('assignedTo').equalTo(uid).get();
     const assignedTickets = entriesToArray(ticketSnap.val());
-    if ((!active || (old.role === 'agent' && role === 'manager')) &&
-        assignedTickets.some(t => ACTIVE_STATUS.has(t.status))) {
-      fail(409, 'Hãy chuyển giao các ticket đang mở trước khi khóa hoặc chuyển nhân viên thành Admin.');
-    }
     try {
       await adminAuth.updateUser(uid, { displayName: name, email, disabled: !active });
     } catch (err) {
@@ -646,10 +524,6 @@ app.delete('/api/users/:uid', requireIT, requireManager, asyncRoute(async (req, 
     if (!old || !isITRole(old.role)) fail(404, 'Không tìm thấy tài khoản IT.');
     if (uid === req.it.uid) fail(403, 'Không thể tự xóa tài khoản đang đăng nhập.');
     await assertManagerSafety(uid, old, null, false);
-    const ticketSnap = await db.ref('tickets').orderByChild('assignedTo').equalTo(uid).get();
-    if (entriesToArray(ticketSnap.val()).some(t => ACTIVE_STATUS.has(t.status))) {
-      fail(409, 'Hãy chuyển giao các ticket chưa hoàn thành trước khi xóa tài khoản.');
-    }
     await db.ref(`users/${uid}/active`).set(false);
     try { await adminAuth.deleteUser(uid); }
     catch (err) { if (err.code !== 'auth/user-not-found') throw err; }

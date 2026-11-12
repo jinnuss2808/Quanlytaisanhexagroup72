@@ -33,7 +33,7 @@ export function normalizeAsset(body = {}) {
 }
 export function enrichAsset(asset, cats = {}, depts = {}) {
   return { ...asset,
-    categoryName: cats[asset.categoryId]?.name || '', categoryCode: cats[asset.categoryId]?.code || '',
+    categoryName: cats[asset.categoryId]?.name || ((asset.isPrinter || asset.assetType === 'printer') ? 'Máy in' : ''), categoryCode: cats[asset.categoryId]?.code || ((asset.isPrinter || asset.assetType === 'printer') ? 'PRINTER' : ''),
     ownerDepartmentName: depts[asset.ownerDepartmentId]?.name || '', ownerDepartmentCode: depts[asset.ownerDepartmentId]?.code || ''
   };
 }

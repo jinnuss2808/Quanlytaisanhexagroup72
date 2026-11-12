@@ -3,7 +3,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
   EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import { ref, query, orderByChild, equalTo, limitToLast, onValue } from 'firebase/database';
 import {
-  ArrowRight, ArrowLeft, Bell, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3,
+  ArrowRight, ArrowLeft, Bell, Check, CheckCircle2, ChevronRight, Clock3,
   ClipboardList, Headphones, LayoutDashboard, Laptop, LifeBuoy, ListFilter, LockKeyhole,
   LogOut, Menu, Monitor, Package, Plus, Search, Send, ShieldCheck, Sparkles,
   Ticket, UserRound, UserRoundPlus, UsersRound, X, AlertCircle, CirclePause,
@@ -22,7 +22,6 @@ const STATUS = {
   resolved: { label: 'Đã xử lý', cls: 'status-resolved', icon: CheckCircle2 },
   closed: { label: 'Đã đóng', cls: 'status-closed', icon: LockKeyhole },
 };
-const PRI = { low: 'Thấp', normal: 'Bình thường', high: 'Cao', urgent: 'Khẩn cấp' };
 const labelType = type => type === 'support' ? 'Hỗ trợ IT' : 'Yêu cầu thiết bị';
 const dateFmt = value => value ? new Date(value).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
 const formatShortDate = value => value ? new Date(value).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—';
@@ -53,7 +52,7 @@ function EmptyState({ icon: Icon = ClipboardList, title, text }) { return <div c
 function Alert({ message, onClose }) { return message ? <div className="alert"><AlertCircle size={17}/><span>{message}</span><button onClick={onClose} aria-label="Đóng"><X size={16}/></button></div> : null; }
 
 const initialForm = { type: 'support', requesterName: '', department: '', position: '', contact: '', email: '',
-  subject: '', description: '', priority: 'normal', itemName: '', quantity: 1 };
+  subject: '', description: '', itemName: '', quantity: 1 };
 function PublicRequestForm({ requester = null }) {
   const [form, setForm] = useState(() => requester ? {
     ...initialForm, requesterName: requester.name, department: requester.department,
@@ -98,7 +97,9 @@ function PublicRequestForm({ requester = null }) {
         </div></div>
       </div>
       {requester && <div className="page-width requester-account-tip"><UserCheck size={18}/>
-        Bạn đang gửi yêu cầu bằng tài khoản <strong>{requester.email}</strong>. Sau khi IT đánh dấu Đã xử lý, bạn sẽ có quyền đánh giá và xác nhận đóng phiếu.</div>}
+        Bạn đang gửi yêu cầu bằng tài khoản <strong>{requester.email}</strong>.
+        {requester.requestedJobLevel==='manager' && !requester.jobLevelApproved && <span> Cấp bậc Quản lý đang chờ IT phê duyệt.</span>}
+        Sau khi IT đánh dấu Đã xử lý, bạn sẽ có quyền đánh giá và xác nhận đóng phiếu.</div>}
       <div className="page-width request-area" id="tao-yeu-cau">
         <div className="section-intro"><div><div className="eyebrow dark">TẠO YÊU CẦU MỚI</div><h2>Bạn cần hỗ trợ vấn đề gì?</h2><p>Chọn loại yêu cầu và điền thông tin bên dưới để gửi đến bộ phận IT.</p></div><div className="intake-badge"><span>01</span><span>/ 02</span><small>BƯỚC ĐẦU TIÊN</small></div></div>
         {success ? <div className="success-card"><div className="success-icon"><CheckCircle2 size={40}/></div><h2>Gửi yêu cầu thành công!</h2>
@@ -128,8 +129,6 @@ function PublicRequestForm({ requester = null }) {
                 <Field label="Tên thiết bị" required icon={Laptop} value={form.itemName} onChange={v => set('itemName', v)} placeholder="Laptop Dell / Màn hình / Bàn phím..." maxLength={120}/>
                 <Field label="Số lượng" required type="number" value={form.quantity} onChange={v => set('quantity', v)} min={1} max={999}/>
               </>}
-              <div className="field"><label>Mức độ ưu tiên</label><div className="control-wrap select-wrap"><select value={form.priority} onChange={e => set('priority', e.target.value)}>
-                <option value="low">Thấp</option><option value="normal">Bình thường</option><option value="high">Cao</option><option value="urgent">Khẩn cấp</option></select><ChevronDown size={18}/></div></div>
               <div className="field span-all"><label>Mô tả chi tiết <span>*</span></label><textarea required rows={5} maxLength={3000} value={form.description} onChange={e => set('description', e.target.value)} placeholder={form.type === 'support' ? 'Mô tả tình trạng lỗi, thiết bị đang sử dụng, thời điểm phát sinh...' : 'Mục đích sử dụng, cấu hình mong muốn, lý do đề xuất...'}/></div>
             </div>
             <Alert message={error} onClose={() => setError('')}/>
@@ -175,7 +174,7 @@ function PublicPage() {
 }
 function RequesterAccess({ hasSession, onRegistered, draft, onDraft }) {
   const [register, setRegister] = useState(false);
-  const [form, setForm] = useState(draft || { name: '', department: '', position: '', contact: '', email: '', password: '' });
+  const [form, setForm] = useState({ name: '', department: '', position: '', contact: '', email: '', password: '', jobLevel: 'employee', ...(draft || {}) });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (key, value) => setForm(old => ({ ...old, [key]: value }));
@@ -184,16 +183,16 @@ function RequesterAccess({ hasSession, onRegistered, draft, onDraft }) {
     try {
       if (register && !hasSession) {
         if (form.password.length < 8 || form.password.length > 128) throw new Error('Mật khẩu cần từ 8 đến 128 ký tự.');
-        onDraft({ name: form.name, department: form.department, position: form.position, contact: form.contact, email: form.email });
+        onDraft({ name: form.name, department: form.department, position: form.position, contact: form.contact, email: form.email, jobLevel: form.jobLevel });
         await createUserWithEmailAndPassword(auth, form.email.trim(), form.password);
         // No email-link verification. Create profile as soon as Auth has signed in.
         const person = await api('/requester/register', { method: 'POST', body: {
-          name: form.name, department: form.department, position: form.position, contact: form.contact
+          name: form.name, department: form.department, position: form.position, contact: form.contact, jobLevel: form.jobLevel
         }});
         onRegistered(person);
       } else if (hasSession) {
         const person = await api('/requester/register', { method: 'POST', body: {
-          name: form.name, department: form.department, position: form.position, contact: form.contact
+          name: form.name, department: form.department, position: form.position, contact: form.contact, jobLevel: form.jobLevel
         }});
         onRegistered(person);
       } else {
@@ -212,6 +211,12 @@ function RequesterAccess({ hasSession, onRegistered, draft, onDraft }) {
         <Field label="Họ tên" required icon={UserRound} value={form.name} onChange={v => set('name', v)}/>
         <Field label="Phòng ban" required icon={Building2} value={form.department} onChange={v => set('department', v)}/>
         <Field label="Chức vụ" required icon={BriefcaseBusiness} value={form.position} onChange={v => set('position', v)}/>
+        <label className="requester-level-control">Cấp bậc
+          <select value={form.jobLevel} onChange={e=>set('jobLevel',e.target.value)}>
+            <option value="employee">Nhân viên</option>
+            <option value="manager">Quản lý trở lên</option>
+          </select>
+        </label>
         <Field label="Số điện thoại" required icon={Phone} value={form.contact} onChange={v => set('contact', v)}/>
       </>}
       {!needsProfile && <>
@@ -363,17 +368,16 @@ function Dashboard({ user, onLogout }) {
     // Always use the signed-in Firebase Auth UID. Never call equalTo(undefined).
     const effectiveUid = auth.currentUser?.uid || user.uid;
     const validUid = typeof effectiveUid === 'string' && effectiveUid.trim().length > 0;
-    const ticketsQuery = user.role === 'manager'
-      ? query(ref(realtimeDb, 'tickets'), orderByChild('createdAt'), limitToLast(200))
-      : validUid
-        ? query(ref(realtimeDb, 'tickets'), orderByChild('assignedTo'), equalTo(effectiveUid))
-        : null;
+    // Shared queue for all active IT users; Firebase Rules protect access.
+    const ticketsQuery = validUid
+      ? query(ref(realtimeDb, 'tickets'), orderByChild('createdAt'))
+      : null;
     const notificationQuery = validUid
       ? query(ref(realtimeDb, `notifications/${effectiveUid}`), orderByChild('createdAt'), limitToLast(50))
       : null;
     if (!validUid) setError('Thiếu UID tài khoản Firebase, vui lòng đăng xuất rồi đăng nhập lại.');
     const unsubscribeTickets = ticketsQuery
-      ? onValue(ticketsQuery, snap => setTickets(realtimeList(snap.val()).slice(0, 200)),
+      ? onValue(ticketsQuery, snap => setTickets(realtimeList(snap.val())),
         err => setError('Không nhận được dữ liệu ticket trực tiếp: ' + err.message))
       : () => {};
     const unsubscribeNotifications = notificationQuery
@@ -395,7 +399,7 @@ function Dashboard({ user, onLogout }) {
   const current = selected ? tickets.find(t => t.id === selected.id) || selected : null;
   const isManager = user.role === 'manager';
   const items = [{ id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
-    { id: 'tickets', label: isManager ? 'Quản lý ticket' : 'Ticket được giao', icon: Ticket, count: tickets.filter(t => t.status === 'new').length },
+    { id: 'tickets', label: 'Quản lý ticket', icon: Ticket, count: tickets.filter(t => t.status === 'new').length },
     { id: 'assets', label: 'Quản lý tài sản', icon: Boxes },
     { id: 'reports', label: 'Thống kê hoàn thành', icon: BarChart3 },
     { id: 'notifications', label: 'Thông báo', icon: Bell, count: unread }];
@@ -403,7 +407,7 @@ function Dashboard({ user, onLogout }) {
     { id: 'requester_accounts', label: 'Tài khoản người yêu cầu', icon: UserRoundPlus },
     { id: 'settings', label: 'Cấu hình người yêu cầu', icon: SlidersHorizontal });
   else items.push({ id: 'leaves', label: 'Ngày nghỉ của tôi', icon: CalendarOff });
-  const title = { overview: 'Tổng quan hệ thống', tickets: isManager ? 'Quản lý ticket' : 'Ticket được phân công', equipment: 'Yêu cầu trang thiết bị', notifications: 'Thông báo của bạn', users: 'Quản lý nhân viên IT', reports: 'Báo cáo hoàn thành', leaves: 'Đăng ký ngày nghỉ', requester_accounts: 'Tài khoản người yêu cầu', settings: 'Cấu hình người yêu cầu', assets: 'Quản lý tài sản' }[section];
+  const title = { overview: 'Tổng quan hệ thống', tickets: 'Quản lý ticket', equipment: 'Yêu cầu trang thiết bị', notifications: 'Thông báo của bạn', users: 'Quản lý nhân viên IT', reports: 'Báo cáo hoàn thành', leaves: 'Đăng ký ngày nghỉ', requester_accounts: 'Tài khoản người yêu cầu', settings: 'Cấu hình người yêu cầu', assets: 'Quản lý tài sản' }[section];
   const ticketCounts = useMemo(() => ({
     support: countTicketsByType(tickets, 'support'),
     equipment: countTicketsByType(tickets, 'equipment'),
@@ -425,7 +429,7 @@ function Dashboard({ user, onLogout }) {
         <Alert message={error} onClose={() => setError('')}/>
         {loading ? <Spinner/> : <>
           {section === 'overview' && <>
-            <div className="welcome-banner"><div><span className="banner-label"><Sparkles size={15}/> QUẢN LÝ HIỆU QUẢ</span><h2>Mọi yêu cầu, một nơi quản lý.</h2><p>{isManager ? 'Ticket chưa được giao sẽ tự động phân bổ sau 5 phút.' : 'Những ticket được giao cho bạn sẽ xuất hiện tại đây.'}</p></div><div className="banner-art"><div className="banner-circle"><ClipboardCheck size={62}/></div><span className="banner-star one">✦</span><span className="banner-star two">✧</span></div></div>
+            <div className="welcome-banner"><div><span className="banner-label"><Sparkles size={15}/> QUẢN LÝ HIỆU QUẢ</span><h2>Mọi yêu cầu, một nơi quản lý.</h2><p>{isManager ? 'Toàn bộ IT cùng nhìn thấy ticket, không cần phân công.' : 'Tất cả ticket đều hiển thị cho IT; người hoàn thành được ghi nhận trong báo cáo.'}</p></div><div className="banner-art"><div className="banner-circle"><ClipboardCheck size={62}/></div><span className="banner-star one">✦</span><span className="banner-star two">✧</span></div></div>
             <div className="stats-grid"><Stat label="Tổng số yêu cầu" value={tickets.length} icon={ClipboardList} color="blue" sub="Tất cả các phiếu"/><Stat label="Chờ tiếp nhận" value={tickets.filter(t => t.status === 'new').length} icon={Clock3} color="orange" sub="Cần được xử lý"/><Stat label="Đang xử lý" value={tickets.filter(t => t.status === 'in_progress').length} icon={Zap} color="purple" sub="Đang thực hiện"/><Stat label="Hoàn thành" value={tickets.filter(t => ['resolved','closed'].includes(t.status)).length} icon={CheckCircle2} color="green" sub="Đã xử lý / đóng"/></div>
             <div className="section-grid"><div className="dash-panel stretch"><div className="panel-header"><div><h3>Yêu cầu gần đây</h3><p>Cập nhật những yêu cầu mới nhất</p></div><button className="text-link" onClick={() => selectSection('tickets')}>Xem tất cả <ArrowRight size={16}/></button></div>
               <TicketTable tickets={tickets.slice(0, 6)} onOpen={openTicket}/></div>
@@ -474,15 +478,14 @@ function Dashboard({ user, onLogout }) {
             try { if (!n.read) { await api('/notifications/' + n.id + '/read', { method: 'PATCH' }); setNotifications(old => old.map(x => x.id === n.id ? { ...x, read: true } : x)); }
               const t = tickets.find(t => t.id === n.ticketId); if (t) openTicket(t);
             } catch (err) { setError(err.message); }
-          }}><div className="notification-icon">{n.type === "reminder" ? <AlarmClock size={19}/> : <Bell size={19}/>}</div><div><strong>{n.title}</strong><p>{n.message}</p><small>{dateFmt(n.createdAt)}</small></div>{!n.read && <div className="unread-dot"/>}</button>) : <EmptyState icon={Bell} title="Bạn chưa có thông báo" text="Các yêu cầu mới và những lần phân công sẽ hiển thị tại đây."/>}</div>}
+          }}><div className="notification-icon">{n.type === "reminder" ? <AlarmClock size={19}/> : <Bell size={19}/>}</div><div><strong>{n.title}</strong><p>{n.message}</p><small>{dateFmt(n.createdAt)}</small></div>{!n.read && <div className="unread-dot"/>}</button>) : <EmptyState icon={Bell} title="Bạn chưa có thông báo" text="Các yêu cầu và nhắc việc sẽ hiển thị tại đây."/>}</div>}
           {section === 'users' && <div className="dash-panel users-panel">
             <div className="panel-header"><div><h3>Danh sách tài khoản IT</h3><p>Quản lý Admin và nhân viên IT; tất cả Admin có quyền ngang nhau.</p></div></div>
-            <div className="responsive-table"><table><thead><tr><th>Nhân viên</th><th>Vai trò</th><th>Đang xử lý</th><th>Đã được giao</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+            <div className="responsive-table"><table><thead><tr><th>Nhân viên</th><th>Vai trò</th><th>Ticket hoàn thành</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
               <tbody>{users.map(u => <tr key={u.uid}>
                 <td><div className="user-cell"><div className="profile-avatar smaller">{shortName(u.name)}</div><div><strong>{u.name}</strong><span>{u.email}</span></div></div></td>
                 <td>{u.role === 'manager' ? 'Admin' : 'Nhân viên IT'}</td>
-                <td><strong>{u.activeTickets ?? 0}</strong> ticket</td>
-                <td>{u.totalAssigned ?? 0}</td>
+                <td><strong>{u.completedTickets ?? 0}</strong> ticket</td>
                 <td><span className={'active-tag ' + (!u.active ? 'inactive' : '')}><span/>{!u.active ? 'Tạm khóa' : isCurrentlyOnLeave(u) ? 'Đang nghỉ' : 'Hoạt động'}</span></td>
                 <td><button className="btn muted small" onClick={() => setEditingUser(u)}><Settings2 size={15}/> Quản lý</button></td>
               </tr>)}</tbody>
@@ -491,7 +494,7 @@ function Dashboard({ user, onLogout }) {
         </>}
       </div>
     </div>
-    {current && <TicketModal ticket={current} agents={users.filter(u => u.role === 'agent' && u.active && !isCurrentlyOnLeave(u))} role={user.role} onClose={() => setSelected(null)} onUpdate={onUpdated} onCreateAsset={ticket => { setSelected(null); setAssetFromTicket(ticket); selectSection('assets'); }} />}
+    {current && <TicketModal ticket={current} role={user.role} onClose={() => setSelected(null)} onUpdate={onUpdated} onCreateAsset={ticket => { setSelected(null); setAssetFromTicket(ticket); selectSection('assets'); }} />}
     {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onCreated={() => { setShowAddUser(false); refresh(true); }}/>}
     {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onSaved={() => { setEditingUser(null); refresh(true); }}/>}
     {showPasswordModal && <ChangePasswordModal onClose={() => setShowPasswordModal(false)}/>}
@@ -499,19 +502,18 @@ function Dashboard({ user, onLogout }) {
 }
 function Stat({ label, value, icon: Icon, color, sub }) { return <div className="stat-card"><div className={'stat-icon ' + color}><Icon size={22}/></div><span className="stat-label">{label}</span><strong>{value}</strong><span className="stat-sub">{sub}</span></div>; }
 function TicketTable({ tickets, onOpen }) {
-  return tickets.length ? <div className="responsive-table"><table className="ticket-table"><thead><tr><th>MÃ YÊU CẦU</th><th>NỘI DUNG</th><th>NGƯỜI GỬI</th><th>NGƯỜI XỬ LÝ</th><th>TRẠNG THÁI</th><th>ĐÁNH GIÁ</th><th>THỜI GIAN</th><th></th></tr></thead><tbody>{tickets.map(t => <tr key={t.id} onClick={() => onOpen(t)} className="clickable-row"><td><strong className="ticket-code">{t.code}</strong></td><td><div className="ticket-desc"><strong>{t.subject}</strong><span>{labelType(t.type)}</span></div></td><td><div className="requester-cell"><strong>{t.requesterName}</strong><span>{t.department}</span></div></td><td>{t.assignedToName ? <span className="assigned"><span className="assigned-avatar">{shortName(t.assignedToName)}</span>{t.assignedToName}</span> : <span className="unassigned">Chưa phân công</span>}</td><td><StatusPill status={t.status}/></td><td><TicketRating rating={t.requesterRating} compact/></td><td><span className="date-cell">{formatShortDate(t.createdAt)}</span></td><td><ChevronRight size={17} className="table-arrow"/></td></tr>)}</tbody></table></div> : <EmptyState icon={ClipboardList} title="Chưa có yêu cầu" text="Không tìm thấy yêu cầu phù hợp."/>;
+  return tickets.length ? <div className="responsive-table"><table className="ticket-table"><thead><tr><th>MÃ YÊU CẦU</th><th>NỘI DUNG</th><th>NGƯỜI GỬI</th><th>NGƯỜI HOÀN THÀNH</th><th>TRẠNG THÁI</th><th>ĐÁNH GIÁ</th><th>THỜI GIAN</th><th></th></tr></thead><tbody>{tickets.map(t => <tr key={t.id} onClick={() => onOpen(t)} className="clickable-row"><td><strong className="ticket-code">{t.code}</strong></td><td><div className="ticket-desc"><strong>{t.subject}</strong><span>{labelType(t.type)}</span></div></td><td><div className="requester-cell"><strong>{t.requesterName}</strong><span>{t.department}</span></div></td><td>{t.completedByName ? <span className="assigned"><span className="assigned-avatar">{shortName(t.completedByName)}</span>{t.completedByName}</span> : <span className="unassigned">Chưa hoàn thành</span>}</td><td><StatusPill status={t.status}/></td><td><TicketRating rating={t.requesterRating} compact/></td><td><span className="date-cell">{formatShortDate(t.createdAt)}</span></td><td><ChevronRight size={17} className="table-arrow"/></td></tr>)}</tbody></table></div> : <EmptyState icon={ClipboardList} title="Chưa có yêu cầu" text="Không tìm thấy yêu cầu phù hợp."/>;
 }
-function TicketModal({ ticket, agents, role, onClose, onUpdate, onCreateAsset }) {
+function TicketModal({ ticket, role, onClose, onUpdate, onCreateAsset }) {
   const [status, setStatus] = useState(ticket.status);
-  const [agent, setAgent] = useState(ticket.assignedTo || '');
   const [comment, setComment] = useState('');
-  const [rejectReason, setRejectReason] = useState('');
   const [requesterMode, setRequesterMode] = useState(false);
   const [activities, setActivities] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const loadActivity = useCallback(() => api('/tickets/' + ticket.id + '/activities').then(setActivities).catch(err => setError(err.message)), [ticket.id]);
-  useEffect(() => { setStatus(ticket.status); setAgent(ticket.assignedTo || ''); }, [ticket.id, ticket.status, ticket.assignedTo]);
+  useEffect(() => { setStatus(ticket.status); }, [ticket.id, ticket.status]);
   useEffect(() => { if (ticket.requesterUid) api('/public/settings',{authRequired:false})
     .then(v => setRequesterMode(v.requesterWorkflowEnabled === true)).catch(() => {}); }, [ticket.requesterUid]);
   useEffect(() => {
@@ -520,35 +522,28 @@ function TicketModal({ ticket, agents, role, onClose, onUpdate, onCreateAsset })
     return onValue(activityQuery, snap => setActivities(realtimeList(snap.val()).reverse()),
       err => setError('Không nhận được lịch sử trực tiếp: ' + err.message));
   }, [ticket.id, loadActivity]);
-  const apply = async (action) => { setBusy(true); setError(''); try { await action(); await onUpdate(); await loadActivity(); } catch (err) { setError(err.message); } finally { setBusy(false); } };
-  const saveStatus = () => apply(() => api('/tickets/' + ticket.id + '/status', { method: 'PATCH', body: { status } }));
-  const saveAgent = () => apply(() => api('/tickets/' + ticket.id + '/assign', { method: 'PATCH', body: { uid: agent } }));
-  const saveNote = () => apply(async () => { await api('/tickets/' + ticket.id + '/comments', { method: 'POST', body: { comment } }); setComment(''); });
-  const decide = decision => apply(async () => { await api('/tickets/' + ticket.id + '/decision', { method:'POST', body:{decision, reason:rejectReason} });
-    if (decision === 'reject') onClose(); });
+  const apply = async (action, successMessage='Thao tác đã lưu thành công.') => { setBusy(true); setError(''); setNotice(''); try { await action(); await onUpdate(); await loadActivity(); setNotice(successMessage); } catch (err) { setError(err.message); } finally { setBusy(false); } };
+  const saveStatus = () => apply(() => api('/tickets/' + ticket.id + '/status', { method: 'PATCH', body: { status } }), `Đã cập nhật trạng thái thành “${STATUS[status]?.label || status}”.`);
+  const finishTicket = () => apply(() => api('/tickets/' + ticket.id + '/status', { method:'PATCH', body:{status:'resolved'} }), 'Đã hoàn thành ticket và ghi nhận nhân viên xử lý.');
+  const saveNote = () => apply(async () => { await api('/tickets/' + ticket.id + '/comments', { method: 'POST', body: { comment } }); setComment(''); },'Đã thêm ghi chú vào lịch sử.');
   return <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div className="modal ticket-modal"><div className="modal-head"><div><span className="eyebrow dark">CHI TIẾT YÊU CẦU</span><h2>{ticket.code}</h2></div><button className="modal-close" onClick={onClose}><X size={22}/></button></div>
-    <div className="modal-body"><div className="detail-header"><TypePill type={ticket.type}/><StatusPill status={ticket.status}/><span className={'priority-tag pri-' + ticket.priority}>Ưu tiên: {PRI[ticket.priority]}</span>
+    <div className="modal-body"><div className="detail-header"><TypePill type={ticket.type}/><StatusPill status={ticket.status}/>
       {Number.isInteger(Number(ticket.requesterRating)) && Number(ticket.requesterRating) >= 1 && Number(ticket.requesterRating) <= 5 &&
         <TicketRating rating={ticket.requesterRating}/>}</div><h3 className="ticket-detail-title">{ticket.subject}</h3><p className="detail-description">{ticket.description}</p>
-      <div className="detail-grid"><Detail label="Người yêu cầu" value={ticket.requesterName}/><Detail label="Phòng ban" value={ticket.department}/><Detail label="Chức vụ" value={ticket.position}/><Detail label="Liên hệ" value={ticket.contact}/><Detail label="Email" value={ticket.email || '—'}/><Detail label="Ngày tạo" value={dateFmt(ticket.createdAt)}/><Detail label="Nhắc việc" value={["resolved", "closed"].includes(ticket.status) ? "Đã dừng" : (ticket.type === "support" ? "Mỗi 30 phút" : "Mỗi 12 giờ")}/><Detail label="Nhắc tiếp theo" value={["resolved", "closed"].includes(ticket.status) ? "—" : dateFmt(ticket.nextReminderAt)}/><Detail label="Hoàn thành" value={dateFmt(ticket.completedAt)}/>
+      <div className="detail-grid"><Detail label="Người yêu cầu" value={ticket.requesterName}/><Detail label="Phòng ban" value={ticket.department}/><Detail label="Chức vụ" value={ticket.position}/><Detail label="Liên hệ" value={ticket.contact}/><Detail label="Email" value={ticket.email || '—'}/><Detail label="Ngày tạo" value={dateFmt(ticket.createdAt)}/><Detail label="Nhắc việc" value={["resolved", "closed"].includes(ticket.status) ? "Đã dừng" : (ticket.type === "support" ? "Mỗi 30 phút" : "Mỗi 12 giờ")}/><Detail label="Nhắc tiếp theo" value={["resolved", "closed"].includes(ticket.status) ? "—" : dateFmt(ticket.nextReminderAt)}/><Detail label="Hoàn thành" value={dateFmt(ticket.completedAt)}/><Detail label="Người hoàn thành" value={ticket.completedByName || 'Chưa có'}/>
         {ticket.requesterRating && <><Detail label="Đánh giá từ người yêu cầu" value={<TicketRating rating={ticket.requesterRating}/>}/>
           <Detail label="Ngày đánh giá" value={dateFmt(ticket.ratedAt || ticket.requesterConfirmedAt)}/></>}{ticket.type === 'equipment' && <><Detail label="Tên thiết bị" value={ticket.itemName}/><Detail label="Số lượng" value={ticket.quantity}/></>}</div>
       {ticket.requesterRating && ticket.requesterReview &&
         <div className="ticket-review"><strong>Nhận xét của người yêu cầu</strong><p>{ticket.requesterReview}</p></div>}
       {ticket.type === 'equipment' && <div className="detail-actions"><h4>Liên kết quản lý tài sản</h4><p className="help-text">Có thể tạo hồ sơ tài sản từ phiếu này. Ticket vẫn giữ quy trình xử lý riêng.</p><button className="btn muted small" onClick={() => onCreateAsset(ticket)}><Boxes size={16}/> Tạo tài sản từ yêu cầu</button></div>}
       <div className="detail-actions"><h4>Quy trình xử lý</h4>
-      {role === 'agent' && ticket.assignmentDecision === 'pending' && <div className="ticket-decision">
-        <strong><Bell size={17}/> Ticket đang chờ phản hồi tiếp nhận</strong>
-        <p>Bạn cần chọn Tiếp nhận hoặc Không tiếp nhận. Nếu từ chối, hệ thống tự chuyển sang nhân viên khác chưa từ chối và không đang nghỉ.</p>
-        <textarea className="note-input" rows={2} value={rejectReason} maxLength={500} onChange={e => setRejectReason(e.target.value)} placeholder="Lý do không tiếp nhận (không bắt buộc)"/>
-        <div className="inline-action"><button className="btn primary small" disabled={busy} onClick={() => decide('accept')}><UserCheck size={16}/> Tiếp nhận ticket</button>
-          <button className="btn danger small" disabled={busy} onClick={() => decide('reject')}><UserX size={16}/> Không tiếp nhận</button></div>
-      </div>}
-      {role === 'agent' && ticket.assignmentDecision === 'accepted' && <p className="success-text"><UserCheck size={16}/> Bạn đã tiếp nhận ticket này.</p>}
+      <p className="help-text">Hàng chờ dùng chung: tất cả nhân viên IT đều nhìn thấy ticket này. Người bấm Hoàn thành đầu tiên sẽ được ghi nhận.</p>
+      {ticket.completedByName && <p className="success-text"><CheckCircle2 size={16}/> Đã hoàn thành bởi {ticket.completedByName}</p>}
       {requesterMode && ticket.requesterUid && ticket.status === 'resolved' && <p className="help-text">Đang chờ người yêu cầu đánh giá, xác nhận hoàn thành và đóng ticket.</p>}
-      <div className="action-block"><label>Cập nhật trạng thái</label><div className="inline-action"><select value={status} disabled={role === 'agent' && ticket.assignmentDecision === 'pending'} onChange={e => setStatus(e.target.value)}>{Object.entries(STATUS).filter(([k]) => !(k === 'closed' && requesterMode && ticket.requesterUid && ticket.status !== 'closed')).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}</select><button className="btn primary small" disabled={busy || status === ticket.status || (role === 'agent' && ticket.assignmentDecision === 'pending')} onClick={saveStatus}>Cập nhật</button></div></div>
-        {role === 'manager' && <div className="action-block"><label>Phân công nhân viên <span className="auto-helper">(Tự động sau 5 phút nếu chưa phân công)</span></label><div className="inline-action"><select value={agent} onChange={e => setAgent(e.target.value)}><option value="">Chọn nhân viên IT</option>{agents.map(a => <option key={a.uid} value={a.uid}>{a.name} · {a.totalAssigned || 0} lượt đã giao · {a.activeTickets || 0} đang mở</option>)}</select><button className="btn primary small" disabled={busy || !agent || agent === ticket.assignedTo} onClick={saveAgent}>Giao việc</button></div></div>}
+      <div className="action-block"><label>Cập nhật trạng thái</label><div className="inline-action"><select value={status} onChange={e => setStatus(e.target.value)}>{Object.entries(STATUS).filter(([k]) => !(k === 'closed' && requesterMode && ticket.requesterUid && ticket.status !== 'closed')).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}</select><button className="btn primary small" disabled={busy || status === ticket.status} onClick={saveStatus}>Cập nhật</button></div></div>
+      {['new','in_progress','on_hold'].includes(ticket.status) && <div className="action-block"><button className="btn primary small" disabled={busy} onClick={finishTicket}><CheckCircle2 size={16}/> Hoàn thành ticket</button><span className="help-text">Hệ thống ghi nhận tài khoản đang đăng nhập là người hoàn thành.</span></div>}
       </div><div className="detail-actions"><h4>Ghi chú nội bộ</h4><textarea className="note-input" placeholder="Thêm ghi chú về quá trình xử lý..." rows={3} value={comment} onChange={e => setComment(e.target.value)} maxLength={2000}/><div className="note-action"><button className="btn muted small" disabled={busy || !comment.trim()} onClick={saveNote}><MessageSquareText size={15}/> Thêm ghi chú</button></div></div>
+      {notice&&<div className="ticket-success-notice" role="status"><CheckCircle2 size={17}/>{notice}</div>}
       <div className="detail-actions"><h4>Lịch sử hoạt động</h4><div className="timeline">{activities.map(a => <div key={a.id} className="timeline-row"><span className="timeline-bullet"/><div><strong>{a.actorName}</strong><p>{a.detail}</p><small>{dateFmt(a.createdAt)}</small></div></div>)}</div></div><Alert message={error} onClose={() => setError('')}/>
     </div></div></div>;
 }
@@ -732,14 +727,14 @@ function LeavePlanner() {
     catch (err) { setError(err.message); } finally { setBusy(false); }
   };
   return <div className="dash-panel leave-panel"><div className="panel-header"><div>
-    <h3>Ngày nghỉ của tôi</h3><p>Trong các ngày đăng ký nghỉ, bạn sẽ không được hệ thống hoặc Admin phân công ticket mới. Ticket đã nhận trước ngày nghỉ vẫn nằm trong danh sách.</p></div></div>
+    <h3>Ngày nghỉ của tôi</h3><p>Lịch nghỉ giúp bộ phận IT chủ động sắp xếp người xử lý. Ticket vẫn hiển thị trong hàng chờ chung, không có bước phân công tự động.</p></div></div>
     <form onSubmit={submit} className="leave-form">
       <label>Từ ngày<input type="date" min={currentVietnamDate()} value={startDate} onChange={e => {setStartDate(e.target.value); if (e.target.value > endDate) setEndDate(e.target.value);}} required/></label>
       <label>Đến ngày<input type="date" min={startDate} value={endDate} onChange={e => setEndDate(e.target.value)} required/></label>
       <label>Lý do (không bắt buộc)<input maxLength={300} value={note} placeholder="Nghỉ phép / công tác..." onChange={e => setNote(e.target.value)}/></label>
       <button type="submit" className="btn primary small" disabled={busy}><Plus size={16}/> Đăng ký nghỉ</button>
     </form><Alert message={error} onClose={() => setError('')}/>
-    <div className="leave-records">{!leaves.length ? <EmptyState icon={CalendarOff} title="Chưa có ngày nghỉ" text="Đăng ký lịch nghỉ để không nhận phân công mới."/> : leaves.map(leave =>
+    <div className="leave-records">{!leaves.length ? <EmptyState icon={CalendarOff} title="Chưa có ngày nghỉ" text="Đăng ký lịch nghỉ để bộ phận IT biết thời gian bạn vắng mặt."/> : leaves.map(leave =>
       <div className="leave-record" key={leave.id}><span><CalendarDays size={17}/> <strong>{leave.startDate} → {leave.endDate}</strong><small>{leave.note || 'Ngày nghỉ'}</small></span>
         <button className="btn muted small" disabled={busy} onClick={() => remove(leave.id)}><X size={15}/> Hủy lịch</button></div>)}</div>
   </div>;
@@ -776,7 +771,8 @@ function RequesterAccountManager() {
           <th>Họ tên / Email</th><th>Phòng ban / Chức vụ</th><th>Liên hệ</th><th>Trạng thái</th><th>Ngày tạo</th><th>Thao tác</th>
         </tr></thead><tbody>{accounts.map(person => <tr key={person.uid}>
           <td><div className="user-cell"><div className="profile-avatar smaller">{shortName(person.name)}</div>
-            <div><strong>{person.name}</strong><span>{person.email}</span></div></div></td>
+            <div><strong>{person.name}</strong><span>{person.email}</span>
+            <span>{person.jobLevel==='manager' && person.jobLevelApproved===true ? 'Quản lý (đã xác minh)' : person.requestedJobLevel==='manager' ? 'Đề nghị Quản lý — chờ duyệt' : 'Nhân viên'}</span></div></div></td>
           <td><strong>{person.department}</strong><div className="muted-value">{person.position}</div></td>
           <td>{person.contact}</td>
           <td><span className={'active-tag ' + (person.active === false ? 'inactive' : '')}>
@@ -793,7 +789,7 @@ function RequesterAccountModal({ account = null, onClose, onSaved }) {
   const editing = Boolean(account);
   const [form, setForm] = useState({ name: account?.name || '', email: account?.email || '',
     department: account?.department || '', position: account?.position || '', contact: account?.contact || '',
-    active: account?.active !== false, password: '' });
+    active: account?.active !== false, jobLevel: account?.jobLevel || 'employee', password: '' });
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -805,7 +801,7 @@ function RequesterAccountModal({ account = null, onClose, onSaved }) {
       if (editing) {
         await api(`/requesters/${account.uid}`, { method: 'PATCH', body: {
           name: form.name, email: form.email, department: form.department, position: form.position,
-          contact: form.contact, active: form.active
+          contact: form.contact, active: form.active, jobLevel: form.jobLevel
         }});
       } else {
         if (form.password.length < 8 || form.password.length > 128) throw new Error('Mật khẩu phải có từ 8 đến 128 ký tự.');
@@ -842,6 +838,13 @@ function RequesterAccountModal({ account = null, onClose, onSaved }) {
           <Field label="Email đăng nhập" required type="email" icon={Mail} value={form.email} onChange={v => set('email', v)}/>
           <Field label="Phòng ban" required icon={Building2} value={form.department} onChange={v => set('department', v)}/>
           <Field label="Chức vụ" required icon={BriefcaseBusiness} value={form.position} onChange={v => set('position', v)}/>
+          <label className="requester-level-control">Cấp bậc đã xác minh (Admin cấp quyền)
+            <select value={form.jobLevel} onChange={e=>set('jobLevel',e.target.value)}>
+              <option value="employee">Nhân viên</option>
+              <option value="manager">Quản lý trở lên</option>
+            </select>
+            {account?.requestedJobLevel==='manager' && !account?.jobLevelApproved && <small>Người dùng đang đề nghị quyền Quản lý. Chỉ phê duyệt nếu đã kiểm tra chức danh thực tế.</small>}
+          </label>
           <Field label="Số liên hệ" required icon={Phone} value={form.contact} onChange={v => set('contact', v)}/>
           {!editing && <Field label="Mật khẩu ban đầu (ít nhất 8 ký tự)" required type="password" icon={LockKeyhole}
             value={form.password} onChange={v => set('password', v)}/>}

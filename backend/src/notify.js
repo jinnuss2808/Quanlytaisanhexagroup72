@@ -15,7 +15,7 @@ export async function notifyPeople(userIds, ticketId, title, message) {
 export async function notifyNewTicket(ticket) {
   const snapshot = await db.ref('users').get();
   const targets = Object.entries(snapshot.val() || {})
-    .filter(([, u]) => u.active === true && u.role === 'manager')
+    .filter(([, u]) => u.active === true && ['manager','agent'].includes(u.role))
     .map(([uid]) => uid);
   await notifyPeople(targets, ticket.id, 'Yêu cầu mới · ' + ticket.code,
     `${ticket.requesterName} (${ticket.department}) gửi ${ticket.type === 'support' ? 'ticket IT' : 'phiếu thiết bị'}: ${ticket.subject}`);
@@ -40,7 +40,7 @@ export async function notifyNewTicket(ticket) {
 export async function notifyReminder(ticket, userIds, users) {
   const intervalLabel = ticket.type === 'support' ? '30 phút' : '12 giờ';
   const subject = `Nhắc xử lý · ${ticket.code}`;
-  const message = `${ticket.subject} — ${ticket.assignedTo ? 'Ticket đang chờ hoàn tất' : 'Chưa phân công nhân viên'}. Hệ thống nhắc mỗi ${intervalLabel} cho đến khi xử lý xong.`;
+  const message = `${ticket.subject} — Ticket nằm trong hàng chờ chung của IT. Nhắc lại mỗi ${intervalLabel} cho đến khi hoàn thành.`;
   const updates = {};
   for (const uid of new Set(userIds.filter(Boolean))) {
     const id = db.ref(`notifications/${uid}`).push().key;

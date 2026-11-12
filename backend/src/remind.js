@@ -31,10 +31,9 @@ export async function sendDueReminder(id) {
   if (!result.committed) return false;
   const ticket = result.snapshot.val();
   const users = (await db.ref('users').get()).val() || {};
-  const assigned = ticket.assignedTo && users[ticket.assignedTo];
-  const targets = assigned?.active === true && assigned.role === 'agent'
-    ? [ticket.assignedTo]
-    : Object.entries(users).filter(([, u]) => u.role === 'manager' && u.active === true).map(([uid]) => uid);
+  const targets = Object.entries(users)
+    .filter(([, u]) => u.active === true && ['agent', 'manager'].includes(u.role))
+    .map(([uid]) => uid);
   if (targets.length) {
     try { await notifyReminder(ticket, targets, users); }
     catch (err) { console.error('[reminder] notify:', ticket.code, err); }

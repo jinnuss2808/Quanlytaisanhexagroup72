@@ -1,15 +1,7 @@
 node_modules
 .env
 .env.*
-!.env.example
 service-account.json
-**/*firebase-admin*.json
-**/*serviceAccountKey*.json
-*.pem
-*.p12
-*.pfx
-.vercel
+*firebase-admin*.json
 .git
-*.bak-*
-*.zip
-*.7z
+.hexa-deploy-backup

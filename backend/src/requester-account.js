@@ -27,3 +27,9 @@ export function isRequesterEnabled(profile) {
 export function canRequesterConfirm(profile, requesterMode) {
   return requesterMode === true && isRequesterEnabled(profile);
 }
+
+// Requested position is self-declared, but privileged urgency is granted by Admin only.
+export function requesterLevel(value) { return value === 'manager' ? 'manager' : 'employee'; }
+export function canUseUrgent(profile) {
+  return profile?.jobLevel === 'manager' && profile?.jobLevelApproved === true && profile?.active !== false;
+}

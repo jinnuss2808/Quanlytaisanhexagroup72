@@ -15,9 +15,9 @@
         "nextReminderAt",
         "requesterUid"
       ],
-      ".read": "auth != null && ((root.child('users').child(auth.uid).child('active').val() === true && (root.child('users').child(auth.uid).child('role').val() === 'manager' || (root.child('users').child(auth.uid).child('role').val() === 'agent' && query.orderByChild === 'assignedTo' && query.equalTo === auth.uid))) || (root.child('settings').child('requesterWorkflowEnabled').val() === true && root.child('requesters').child(auth.uid).exists() && root.child('requesters').child(auth.uid).child('active').val() !== false && query.orderByChild === 'requesterUid' && query.equalTo === auth.uid))",
+      ".read": "auth != null && ((root.child('users').child(auth.uid).child('active').val() === true && (root.child('users').child(auth.uid).child('role').val() === 'manager' || root.child('users').child(auth.uid).child('role').val() === 'agent')) || ((root.child('settings').child('requesterWorkflowEnabled').val() === true && root.child('requesters').child(auth.uid).exists() && root.child('requesters').child(auth.uid).child('active').val() !== false) && query.orderByChild === 'requesterUid' && query.equalTo === auth.uid))",
       "$ticketId": {
-        ".read": "auth != null && ((root.child('users').child(auth.uid).child('active').val() === true && (root.child('users').child(auth.uid).child('role').val() === 'manager' || (root.child('users').child(auth.uid).child('role').val() === 'agent' && data.child('assignedTo').val() === auth.uid))) || (root.child('settings').child('requesterWorkflowEnabled').val() === true && root.child('requesters').child(auth.uid).exists() && root.child('requesters').child(auth.uid).child('active').val() !== false && data.child('requesterUid').val() === auth.uid))"
+        ".read": "auth != null && ((root.child('users').child(auth.uid).child('active').val() === true && (root.child('users').child(auth.uid).child('role').val() === 'manager' || root.child('users').child(auth.uid).child('role').val() === 'agent')) || ((root.child('settings').child('requesterWorkflowEnabled').val() === true && root.child('requesters').child(auth.uid).exists() && root.child('requesters').child(auth.uid).child('active').val() !== false) && data.child('requesterUid').val() === auth.uid))"
       }
     },
     "notifications": {
@@ -30,7 +30,7 @@
     },
     "activities": {
       "$ticketId": {
-        ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() === true && (root.child('users').child(auth.uid).child('role').val() === 'manager' || root.child('tickets').child($ticketId).child('assignedTo').val() === auth.uid)",
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('active').val() === true && (root.child('users').child(auth.uid).child('role').val() === 'manager' || root.child('users').child(auth.uid).child('role').val() === 'agent'))",
         ".indexOn": [
           "createdAt"
         ]
