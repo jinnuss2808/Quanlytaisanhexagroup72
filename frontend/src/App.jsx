@@ -1,3 +1,4 @@
+// GIT_TEST_CHANGE_2026
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
   EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
