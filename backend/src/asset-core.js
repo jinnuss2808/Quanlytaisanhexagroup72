@@ -23,6 +23,7 @@ export function normalizeAsset(body = {}) {
     categoryId: asText(body.categoryId, 128) || null,
     ownerDepartmentId: asText(body.ownerDepartmentId ?? body.departmentId, 128) || null,
     assignedTo: asText(body.assignedTo, 255) || null,
+    userDepartment: asText(body.userDepartment, 100) || null,
     ipAddress: asText(body.ipAddress, 50) || null,
     serialNumber: asText(body.serialNumber, 255) || null,
     purchaseDate: date || null,

@@ -15,6 +15,7 @@ import { vietnamDate, validDate } from './workflow.js';
 import { applySharedTicketStatus } from './shared-ticket.js';
 import { validateRequesterEmail, validateRequesterPassword, validateRequesterProfile, isRequesterEnabled, canRequesterConfirm, requesterLevel } from './requester-account.js';
 import { isITRole, mustKeepAnotherManager, countOtherManagers } from './admin-roles.js';
+import { isTicketModuleEnabled } from './ticket-module.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -76,6 +77,16 @@ async function readWorkflow() {
   const snap = await db.ref('settings/requesterWorkflowEnabled').get();
   return snap.val() === true;
 }
+// Ticket module is enabled by default to preserve existing installations. Only a manager can toggle it.
+async function readTicketEnabled() {
+  return isTicketModuleEnabled((await db.ref('settings/ticketEnabled').get()).val());
+}
+async function requireTicketEnabled(_req, _res, next) {
+  try {
+    if (!(await readTicketEnabled())) fail(403, 'Phân hệ Ticket đã tạm tắt. Liên hệ bộ phận IT để được hỗ trợ.');
+    next();
+  } catch (err) { next(err); }
+}
 async function requireRequester(req, _res, next) {
   try {
     if (!(await readWorkflow())) fail(403, 'Chế độ người yêu cầu đăng nhập đang tắt.');
@@ -119,18 +130,26 @@ app.use('/api/assets', requireIT, assetRouter);
 app.use('/api/warehouse', requireIT, warehouseRouter);
 // OFF by default. This setting is persisted in Realtime Database only by a manager.
 app.get('/api/public/settings', asyncRoute(async (_req, res) => {
-  res.json({ requesterWorkflowEnabled: await readWorkflow() });
+  res.json({ requesterWorkflowEnabled: await readWorkflow(), ticketEnabled: await readTicketEnabled() });
 }));
 app.get('/api/settings', requireIT, requireManager, asyncRoute(async (_req, res) => {
-  res.json({ requesterWorkflowEnabled: await readWorkflow() });
+  res.json({ requesterWorkflowEnabled: await readWorkflow(), ticketEnabled: await readTicketEnabled() });
 }));
 app.patch('/api/settings', requireIT, requireManager, asyncRoute(async (req, res) => {
-  if (typeof req.body?.requesterWorkflowEnabled !== 'boolean') fail(400, 'Giá trị công tắc không hợp lệ.');
-  await db.ref('settings/requesterWorkflowEnabled').set(req.body.requesterWorkflowEnabled);
-  res.json({ requesterWorkflowEnabled: req.body.requesterWorkflowEnabled });
+  const body = req.body || {};
+  const hasTicket = Object.hasOwn(body, 'ticketEnabled');
+  const hasRequester = Object.hasOwn(body, 'requesterWorkflowEnabled');
+  if (!hasTicket && !hasRequester) fail(400, 'Chưa chọn cấu hình để cập nhật.');
+  if (hasTicket && typeof body.ticketEnabled !== 'boolean') fail(400, 'Trạng thái phân hệ Ticket không hợp lệ.');
+  if (hasRequester && typeof body.requesterWorkflowEnabled !== 'boolean') fail(400, 'Chế độ tài khoản người yêu cầu không hợp lệ.');
+  const updates = {};
+  if (hasTicket) updates['settings/ticketEnabled'] = body.ticketEnabled;
+  if (hasRequester) updates['settings/requesterWorkflowEnabled'] = body.requesterWorkflowEnabled;
+  await db.ref().update(updates);
+  res.json({ ticketEnabled: await readTicketEnabled(), requesterWorkflowEnabled: await readWorkflow() });
 }));
 // Self-service requester registration: email verification links are NOT required.
-app.post('/api/requester/register', requireSignedIn, asyncRoute(async (req, res) => {
+app.post('/api/requester/register', requireSignedIn, requireTicketEnabled, asyncRoute(async (req, res) => {
   if (!(await readWorkflow())) fail(403, 'Chế độ tài khoản người yêu cầu đang tắt.');
   if ((await db.ref(`users/${req.identity.uid}`).get()).exists()) fail(403, 'Tài khoản IT không thể đăng ký thành người yêu cầu.');
   const profile = validateRequesterProfile(req.body);
@@ -218,7 +237,7 @@ app.get('/api/requester/tickets', requireRequester, asyncRoute(async (req, res) 
   const snap = await db.ref('tickets').orderByChild('requesterUid').equalTo(req.requester.uid).get();
   res.json(entriesToArray(snap.val()).sort(newestFirst).slice(0, 200));
 }));
-app.patch('/api/requester/tickets/:id/confirm', requireRequester, asyncRoute(async (req, res) => {
+app.patch('/api/requester/tickets/:id/confirm', requireRequester, requireTicketEnabled, asyncRoute(async (req, res) => {
   const rating = Number(req.body?.rating);
   const review = normalizeText(req.body?.review, 1000);
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) fail(400, 'Vui lòng đánh giá từ 1 đến 5 sao.');
@@ -247,7 +266,7 @@ app.patch('/api/requester/tickets/:id/confirm', requireRequester, asyncRoute(asy
 }));
 const publicLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 12, standardHeaders: 'draft-7', legacyHeaders: false,
   message: { error: 'Gửi quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.' } });
-app.post('/api/public/tickets', publicLimiter, asyncRoute(async (req, res) => {
+app.post('/api/public/tickets', publicLimiter, requireTicketEnabled, asyncRoute(async (req, res) => {
   const input = sanitizeTicketInput(req.body || {});
   const enabled = await readWorkflow();
   let requester = null;
@@ -300,7 +319,7 @@ app.get('/api/tickets/:id/activities', requireIT, asyncRoute(async (req, res) =>
   const snap = await db.ref(`activities/${req.params.id}`).orderByChild('createdAt').limitToLast(150).get();
   res.json(entriesToArray(snap.val()).sort((a,b) => a.createdAt - b.createdAt));
 }));
-app.post('/api/tickets/:id/comments', requireIT, asyncRoute(async (req, res) => {
+app.post('/api/tickets/:id/comments', requireIT, requireTicketEnabled, asyncRoute(async (req, res) => {
   const comment = normalizeText(req.body?.comment, 2000);
   if (!comment) fail(400, 'Vui lòng nhập ghi chú.');
   const path = itemPath('tickets', req.params.id);
@@ -320,7 +339,7 @@ app.post('/api/tickets/:id/comments', requireIT, asyncRoute(async (req, res) => 
     actorName: req.it.name, detail: comment, createdAt: now });
   res.status(201).json({ ok: true });
 }));
-app.patch('/api/tickets/:id/status', requireIT, asyncRoute(async (req, res) => {
+app.patch('/api/tickets/:id/status', requireIT, requireTicketEnabled, asyncRoute(async (req, res) => {
   const newStatus = req.body?.status;
   if (!STATUS.includes(newStatus)) fail(400, 'Trạng thái không hợp lệ.');
   const path = itemPath('tickets', req.params.id);

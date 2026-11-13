@@ -7,8 +7,14 @@ import { transactExistingTicket } from './ticket-transaction.js';
 // One process is expected to own the timer. RTDB transactions claim each due reminder,
 // making individual reminders safe from duplicate sends when the sweep overlaps.
 let running = false;
+// Pausing Ticket should not create or send reminder notifications.
+async function ticketIsOn() {
+  return (await db.ref('settings/ticketEnabled').get()).val() !== false;
+}
+
 
 export async function initializeLegacyReminders() {
+  if (!(await ticketIsOn())) return 0;
   const snap = await db.ref('tickets').get();
   let updated = 0;
   for (const [id, ticketData] of Object.entries(snap.val() || {})) {
@@ -44,6 +50,7 @@ export async function sendDueReminder(id) {
 }
 
 export async function runReminderSweep() {
+  if (!(await ticketIsOn())) return 0;
   if (running) return 0;
   running = true;
   try {

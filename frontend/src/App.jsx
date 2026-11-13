@@ -145,6 +145,7 @@ function PublicRequestForm({ requester = null }) {
 function PublicPage() {
   const [enabled, setEnabled] = useState(null);
   const [settingsError, setSettingsError] = useState('');
+  const [ticketAvailable, setTicketAvailable] = useState(true);
   const [firebaseUser, setFirebaseUser] = useState(undefined);
   const [requester, setRequester] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -153,7 +154,7 @@ function PublicPage() {
   useEffect(() => {
     let mounted = true;
     api('/public/settings', { authRequired: false })
-      .then(v => { if (mounted) setEnabled(v.requesterWorkflowEnabled === true); })
+      .then(v => { if (mounted) { setEnabled(v.requesterWorkflowEnabled === true); setTicketAvailable(v.ticketEnabled !== false); } })
       .catch(err => { if (mounted) { setSettingsError(err.message); setEnabled('unavailable'); } });
     return () => { mounted = false; };
   }, []);
@@ -169,6 +170,12 @@ function PublicPage() {
   }, [enabled, firebaseUser]);
   if (enabled === null || firebaseUser === undefined || loading) return <Spinner label="Đang tải cổng yêu cầu..."/>;
   if (enabled === 'unavailable') return <div className="requester-auth-root"><div className="requester-auth-card card-surface"><Brand/><h2>Không tải được cấu hình hệ thống</h2><p>Vui lòng kiểm tra máy chủ Node.js và thử tải lại trang.</p><Alert message={settingsError}/><button className="btn primary full" onClick={() => window.location.reload()}>Thử lại</button></div></div>;
+  if (!ticketAvailable) return <div className="requester-auth-root"><div className="requester-auth-card card-surface">
+    <Brand/><div style={{display:'flex',justifyContent:'center',margin:'12px auto',color:'#2563eb'}}><CirclePause size={27}/></div>
+    <h2>Cổng yêu cầu đang tạm ngừng</h2>
+    <p>HEXA đang tạm tắt tính năng Ticket. Hệ thống Quản lý tài sản vẫn hoạt động bình thường.</p>
+    <a className="btn primary full" href="/it">Đăng nhập hệ thống IT</a>
+  </div></div>;
   if (!enabled) return <PublicRequestForm/>;
   if (requester) return <PublicRequestForm requester={requester}/>;
   return <RequesterAccess hasSession={Boolean(firebaseUser)} onRegistered={setRequester} draft={draft} onDraft={setDraft}/>;
@@ -318,7 +325,9 @@ function LoginPage() {
   </div>;
 }
 function Dashboard({ user, onLogout }) {
-  const [section, setSection] = useState('overview');
+  // Asset management is the primary module while Ticket may be disabled.
+  const [section, setSection] = useState('assets');
+  const [ticketEnabled, setTicketEnabled] = useState(true);
   const [tickets, setTickets] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [users, setUsers] = useState([]);
@@ -347,10 +356,21 @@ function Dashboard({ user, onLogout }) {
   const [editingUser, setEditingUser] = useState(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [assetFromTicket, setAssetFromTicket] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    api('/public/settings', { authRequired: false })
+      .then(v => { if (mounted) {
+        const on = v.ticketEnabled !== false;
+        setTicketEnabled(on);
+        if (!on) setSection('assets');
+      }})
+      .catch(err => { if (mounted) setError('Không tải được cấu hình Ticket: ' + err.message); });
+    return () => { mounted = false; };
+  }, []);
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const requests = [api('/tickets'), api('/notifications')];
+      const requests = [ticketEnabled ? api('/tickets') : Promise.resolve([]), ticketEnabled ? api('/notifications') : Promise.resolve([])];
       if (user.role === 'manager') requests.push(api('/users'));
       const [t, n, u] = await Promise.all(requests);
       // Backend/Vercel may return an error object or non-array payload.
@@ -362,13 +382,13 @@ function Dashboard({ user, onLogout }) {
       setError('');
     } catch (err) { setError(err.message); }
     finally { if (!silent) setLoading(false); }
-  }, [user.role]);
+  }, [user.role, ticketEnabled]);
   useEffect(() => {
     refresh();
     // Firebase RTDB listeners update tickets and notifications as soon as data changes.
     // Always use the signed-in Firebase Auth UID. Never call equalTo(undefined).
     const effectiveUid = auth.currentUser?.uid || user.uid;
-    const validUid = typeof effectiveUid === 'string' && effectiveUid.trim().length > 0;
+    const validUid = typeof effectiveUid === 'string' && effectiveUid.trim().length > 0 && ticketEnabled;
     // Shared queue for all active IT users; Firebase Rules protect access.
     const ticketsQuery = validUid
       ? query(ref(realtimeDb, 'tickets'), orderByChild('createdAt'))
@@ -386,9 +406,10 @@ function Dashboard({ user, onLogout }) {
         err => setError('Không nhận được thông báo trực tiếp: ' + err.message))
       : () => {};
     return () => { unsubscribeTickets(); unsubscribeNotifications(); };
-  }, [refresh, user.role, user.uid]);
+  }, [refresh, user.role, user.uid, ticketEnabled]);
   const openTicket = ticket => { setSelected(ticket); };
   const selectSection = key => {
+    if (!ticketEnabled && ['tickets','equipment','overview','reports','notifications','requester_accounts','leaves'].includes(key)) key = 'assets';
     // Preserve existing entry points that opened the old equipment section.
     if (key === 'equipment') { setTicketTab('equipment'); setSection('tickets'); }
     else setSection(key);
@@ -399,16 +420,22 @@ function Dashboard({ user, onLogout }) {
   const onUpdated = async () => { await refresh(true); };
   const current = selected ? tickets.find(t => t.id === selected.id) || selected : null;
   const isManager = user.role === 'manager';
-  const items = [{ id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
-    { id: 'tickets', label: 'Quản lý ticket', icon: Ticket, count: tickets.filter(t => t.status === 'new').length },
+  const items = [
+    ...(ticketEnabled ? [
+      { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
+      { id: 'tickets', label: 'Quản lý ticket', icon: Ticket, count: tickets.filter(t => t.status === 'new').length },
+    ] : []),
     { id: 'assets', label: 'Quản lý tài sản', icon: Boxes },
-    { id: 'reports', label: 'Thống kê hoàn thành', icon: BarChart3 },
-    { id: 'notifications', label: 'Thông báo', icon: Bell, count: unread }];
+    ...(ticketEnabled ? [
+      { id: 'reports', label: 'Thống kê hoàn thành', icon: BarChart3 },
+      { id: 'notifications', label: 'Thông báo', icon: Bell, count: unread }
+    ] : []),
+  ];
   if (isManager) items.push({ id: 'users', label: 'Nhân viên IT', icon: UsersRound },
-    { id: 'requester_accounts', label: 'Tài khoản người yêu cầu', icon: UserRoundPlus },
-    { id: 'settings', label: 'Cấu hình người yêu cầu', icon: SlidersHorizontal });
-  else items.push({ id: 'leaves', label: 'Ngày nghỉ của tôi', icon: CalendarOff });
-  const title = { overview: 'Tổng quan hệ thống', tickets: 'Quản lý ticket', equipment: 'Yêu cầu trang thiết bị', notifications: 'Thông báo của bạn', users: 'Quản lý nhân viên IT', reports: 'Báo cáo hoàn thành', leaves: 'Đăng ký ngày nghỉ', requester_accounts: 'Tài khoản người yêu cầu', settings: 'Cấu hình người yêu cầu', assets: 'Quản lý tài sản' }[section];
+    ...(ticketEnabled ? [{ id: 'requester_accounts', label: 'Tài khoản người yêu cầu', icon: UserRoundPlus }] : []),
+    { id: 'settings', label: 'Cấu hình hệ thống', icon: SlidersHorizontal });
+  else if (ticketEnabled) items.push({ id: 'leaves', label: 'Ngày nghỉ của tôi', icon: CalendarOff });
+  const title = { overview: 'Tổng quan hệ thống', tickets: 'Quản lý ticket', equipment: 'Yêu cầu trang thiết bị', notifications: 'Thông báo của bạn', users: 'Quản lý nhân viên IT', reports: 'Báo cáo hoàn thành', leaves: 'Đăng ký ngày nghỉ', requester_accounts: 'Tài khoản người yêu cầu', settings: 'Cấu hình hệ thống', assets: 'Quản lý tài sản' }[section];
   const ticketCounts = useMemo(() => ({
     support: countTicketsByType(tickets, 'support'),
     equipment: countTicketsByType(tickets, 'equipment'),
@@ -473,7 +500,7 @@ function Dashboard({ user, onLogout }) {
           {section === 'assets' && <AssetManagement user={user} initialTicket={assetFromTicket} onClearInitialTicket={() => setAssetFromTicket(null)}/>}
           {section === 'reports' && <CompletionReport user={user}/>}
           {section === 'leaves' && !isManager && <LeavePlanner/>}
-          {section === 'settings' && isManager && <RequesterModeSettings/>}
+          {section === 'settings' && isManager && <><TicketModuleSettings enabled={ticketEnabled} onChanged={setTicketEnabled}/>{ticketEnabled && <RequesterModeSettings/>}</>}
           {section === 'requester_accounts' && isManager && <RequesterAccountManager/>}
           {section === 'notifications' && <div className="dash-panel notifications-panel"><div className="panel-header"><div><h3>Trung tâm thông báo</h3><p>{unread} thông báo chưa đọc</p></div></div>{notifications.length ? notifications.map(n => <button className={'notification-item ' + (!n.read ? 'unread ' : '') + (n.type === 'reminder' ? 'reminder' : '')} key={n.id} onClick={async () => {
             try { if (!n.read) { await api('/notifications/' + n.id + '/read', { method: 'PATCH' }); setNotifications(old => old.map(x => x.id === n.id ? { ...x, read: true } : x)); }
@@ -868,6 +895,35 @@ function RequesterAccountModal({ account = null, onClose, onSaved }) {
         <Alert message={error} onClose={() => setError('')}/>
       </div>
     </div>
+  </div>;
+}
+
+function TicketModuleSettings({ enabled, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const toggle = async () => {
+    const next = !enabled;
+    if (!next && !window.confirm('Tạm tắt Ticket? Người dùng sẽ không gửi yêu cầu mới và các thông báo nhắc việc sẽ tạm dừng. Dữ liệu cũ vẫn được giữ.')) return;
+    setBusy(true); setError(''); setSuccess('');
+    try {
+      const data = await api('/settings', { method: 'PATCH', body: { ticketEnabled: next } });
+      onChanged(data.ticketEnabled !== false);
+      setSuccess(next ? 'Đã bật lại Ticket. Nhân viên có thể tiếp tục gửi yêu cầu.' : 'Đã tạm tắt Ticket. Quản lý tài sản vẫn hoạt động.');
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  return <div className="dash-panel requester-settings ticket-module-settings" style={{marginBottom:20}}>
+    <div className="panel-header"><div><h3>Bật / tắt phân hệ Ticket</h3>
+      <p>Chỉ Admin được thay đổi. Dữ liệu ticket đã tạo sẽ không bị xóa.</p></div></div>
+    <Alert message={error} onClose={() => setError('')}/>
+    {success && <div className="settings-guide"><CheckCircle2 size={18}/>{success}</div>}
+    <div className="settings-toggle-row"><div><strong>Cổng yêu cầu và quản lý Ticket</strong>
+      <p>Bật: Có cổng gửi yêu cầu, danh sách Ticket, thống kê và thông báo. Tắt: Ẩn các mục Ticket, chặn tạo/cập nhật yêu cầu và tạm dừng nhắc việc; vẫn sử dụng Quản lý tài sản bình thường.</p></div>
+      <button type="button" role="switch" aria-label="Bật hoặc tắt Ticket" aria-checked={enabled}
+        className={'mode-toggle ' + (enabled ? 'on' : '')} disabled={busy} onClick={toggle}>
+        <span/>{busy ? 'ĐANG LƯU' : enabled ? 'ĐANG BẬT' : 'ĐANG TẮT'}
+      </button></div>
   </div>;
 }
 

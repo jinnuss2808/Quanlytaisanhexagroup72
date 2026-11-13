@@ -7,6 +7,9 @@ import { readAssetExcel,writeAssetExcel } from './asset-excel.js';
 import { prepareExcelImport } from './asset-xlsx-import.js';
 import { quantity,stockChange } from './warehouse-core.js';
 import { isPrinterAsset, validatePrinterToner, normalizePrinterDetails } from './printer-core.js';
+import { auditChanges, lowStockItems, assetReport, resolveStocktakeAsset, stocktakeProgress } from './asset-ops.js';
+import { collectInventoryBackup, zippedInventoryBackup } from './asset-backup.js';
+import { recordStockThreshold } from './stock-alerts.js';
 
 const router = express.Router();
 const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
@@ -75,6 +78,68 @@ router.delete('/catalogs/:kind/:id',requireManager,wrap(async(req,res)=>{
   await db.ref(`${kind}/${id}`).remove();res.json({ok:true});
 }));
 
+// Reporting, stocktakes and backups: static endpoints must precede '/:id'.
+router.get('/reports/summary',wrap(async(_req,res)=>{
+ const [all,departments,categories]=await Promise.all([obj('assets'),obj('assetDepartments'),obj('assetCategories')]);
+ res.json(assetReport(all,categories,departments));
+}));
+router.get('/stocktakes',wrap(async(_req,res)=>{
+ const all=await obj('assetStocktakes');
+ res.json({items:Object.values(all).map(x=>({...x,expected:undefined,scans:undefined,
+   ...stocktakeProgress(x)})).map(x=>({...x,missingAssets:undefined,foundAssets:undefined}))
+  .sort((a,b)=>b.createdAt-a.createdAt).slice(0,100)});
+}));
+router.post('/stocktakes',requireManager,wrap(async(req,res)=>{
+ const ownerDepartmentId=asText(req.body?.ownerDepartmentId,128);
+ const name=asText(req.body?.name,150)||`Kiểm kê ngày ${new Date().toLocaleDateString('vi-VN')}`;
+ const rows=Object.values(await obj('assets')).filter(a=>a&&!a.deletedAt&&(!ownerDepartmentId||a.ownerDepartmentId===ownerDepartmentId));
+ if(rows.length>10000)throw assetError(413,'Đợt kiểm kê tối đa 10.000 tài sản.');
+ const id='st_'+assetUUID().replaceAll('-','');
+ const expected=Object.fromEntries(rows.map(a=>[a.id,{assetCode:a.assetCode,assetName:a.assetName}]));
+ const row={id,name,ownerDepartmentId:ownerDepartmentId||null,createdAt:Date.now(),createdBy:req.it.uid,createdByName:req.it.name||req.it.email,
+  closedAt:null,expected,scans:{}};
+ await db.ref(`assetStocktakes/${id}`).set(row);
+ res.status(201).json({...row,...stocktakeProgress(row),expected:undefined,scans:undefined});
+}));
+router.get('/stocktakes/:id',wrap(async(req,res)=>{
+ const id=validId(req.params.id),session=(await db.ref(`assetStocktakes/${id}`).get()).val();
+ if(!session)throw assetError(404,'Không tìm thấy đợt kiểm kê.');
+ res.json({...session,...stocktakeProgress(session,await obj('assets')),expected:undefined,scans:undefined});
+}));
+router.post('/stocktakes/:id/scan',wrap(async(req,res)=>{
+ const id=validId(req.params.id),code=req.body?.code;
+ // Resolve from server-side records; the client cannot claim an arbitrary asset as scanned.
+ const [assets,publicIds,indices]=await Promise.all([obj('assets'),obj('assetPublicIds'),obj('assetCodeIndex')]);
+ const asset=resolveStocktakeAsset(code,assets,publicIds,indices);
+ const ref=db.ref(`assetStocktakes/${id}`);
+ let reason='Không thể ghi nhận kiểm kê.';
+ const tx=await conditionalUpdate(ref,old=>{
+   if(!old){reason='Không tìm thấy đợt kiểm kê.';return undefined;}
+   if(old.closedAt){reason='Đợt kiểm kê đã kết thúc.';return undefined;}
+   if(!old.expected?.[asset.id]){reason='Tài sản không thuộc đợt kiểm kê này.';return undefined;}
+   if(old.scans?.[asset.id]){reason='Tài sản này đã được kiểm kê.';return undefined;}
+   return {...old,scans:{...(old.scans||{}),[asset.id]:{assetId:asset.id,at:Date.now(),byUid:req.it.uid,byName:req.it.name||req.it.email}}};
+ });
+ if(!tx.committed)throw assetError(409,reason);
+ res.json({ok:true,asset:{id:asset.id,assetCode:asset.assetCode,assetName:asset.assetName},...stocktakeProgress(tx.snapshot.val())});
+}));
+router.post('/stocktakes/:id/close',requireManager,wrap(async(req,res)=>{
+ const id=validId(req.params.id),ref=db.ref(`assetStocktakes/${id}`);
+ const tx=await conditionalUpdate(ref,old=>old&&!old.closedAt?{...old,closedAt:Date.now(),closedBy:req.it.uid}:undefined);
+ if(!tx.committed)throw assetError(409,'Không thể kết thúc đợt kiểm kê.');
+ res.json({ok:true,...stocktakeProgress(tx.snapshot.val())});
+}));
+router.get('/backups/status',requireManager,wrap(async(_req,res)=>{
+ res.json({lastRun:(await db.ref('inventoryBackupRuns/latest').get()).val()||null,
+  autoBackupRequires:'Firebase Blaze, Cloud Functions Scheduler và HEXA_BACKUP_BUCKET'});
+}));
+router.get('/backups/download',requireManager,wrap(async(_req,res)=>{
+ const archive=zippedInventoryBackup(await collectInventoryBackup(db));
+ if(archive.length>8*1024*1024)throw assetError(413,'Bản sao lưu vượt kích thước tải trực tiếp. Dùng Cloud Backup vào Storage.');
+ res.set('Content-Type','application/gzip');
+ res.set('Content-Disposition',`attachment; filename="HEXA-Inventory-${new Date().toISOString().slice(0,10)}.json.gz"`);
+ res.send(archive);
+}));
 router.get('/summary',wrap(async(_req,res)=>{
   const assets=Object.values(await obj('assets')).filter(x=>!x.deletedAt);
   const tally=Object.fromEntries(['available','using','maintenance','broken','liquidated'].map(s=>[s,assets.filter(x=>x.status===s).length]));
@@ -216,7 +281,7 @@ router.patch('/printers/:id',wrap(async(req,res)=>{
     if(current.updatedAt!==old.updatedAt)throw assetError(409,'Máy in vừa được nhân viên khác cập nhật.');
     return {...current,...details,isPrinter:true,assetType:'printer',updatedAt:Date.now()};
   });
-  await addLog(id,'updated',req.it,{summary:'Cập nhật thông tin máy in'});
+  await addLog(id,'updated',req.it,{summary:'Cập nhật thông tin máy in',changes:auditChanges(old,updated)});
   res.json(enrichAsset(updated,cats,depts));
 }));
 
@@ -255,7 +320,7 @@ router.patch('/:id',wrap(async(req,res)=>{
     });}
   catch(err){if(data.assetCode!==old.assetCode)await db.ref('assetCodeIndex/'+keyForCode(data.assetCode)).remove().catch(()=>{});throw err;}
   if(data.assetCode!==old.assetCode)await db.ref('assetCodeIndex/'+keyForCode(old.assetCode)).remove();
-  await addLog(id,'updated',req.it,{summary:'Đã sửa thông tin tài sản'});res.json(changed);
+  await addLog(id,'updated',req.it,{summary:'Đã sửa thông tin tài sản',changes:auditChanges(old,changed)});res.json(changed);
 }));
 router.delete('/:id',wrap(async(req,res)=>{
   const id=validId(req.params.id),old=await assetById(id);
@@ -275,17 +340,17 @@ router.post('/:id/restore',wrap(async(req,res)=>{
 }));
 router.post('/:id/assign',wrap(async(req,res)=>{
   const id=validId(req.params.id);await assetById(id);
-  const name=asText(req.body?.assignedTo,255),date=asText(req.body?.date,10),note=asText(req.body?.note,1000);
+  const name=asText(req.body?.assignedTo,255),date=asText(req.body?.date,10),note=asText(req.body?.note,1000),userDepartment=asText(req.body?.userDepartment,100);
   if(!name)throw assetError(400,'Vui lòng nhập người nhận tài sản.');
   if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))throw assetError(400,'Ngày bàn giao không hợp lệ.');
   const result=await edited(id,old=>{
     if(old.status==='using'||old.assignedTo)throw assetError(409,'Tài sản đang được sử dụng, hãy thu hồi trước.');
     if(old.status!=='available')throw assetError(409,'Chỉ được bàn giao tài sản ở trạng thái Có sẵn.');
-    return {...old,status:'using',assignedTo:name,updatedAt:Date.now()};
+    return {...old,status:'using',assignedTo:name,userDepartment:userDepartment||old.userDepartment||null,updatedAt:Date.now()};
   });
   const key=db.ref(`assetAssignments/${id}`).push().key;
-  await db.ref(`assetAssignments/${id}/${key}`).set({id:key,assignedTo:name,date:date||new Date().toISOString().slice(0,10),note,assignedAt:Date.now(),assignedBy:req.it.uid});
-  await addLog(id,'assigned',req.it,{summary:`Bàn giao cho ${name}`,note});res.json(result);
+  await db.ref(`assetAssignments/${id}/${key}`).set({id:key,assignedTo:name,date:date||new Date().toISOString().slice(0,10),note,userDepartment,assignedAt:Date.now(),assignedBy:req.it.uid});
+  await addLog(id,'assigned',req.it,{summary:`Bàn giao cho ${name}`,note,userDepartment});res.json(result);
 }));
 router.post('/:id/return',wrap(async(req,res)=>{
   const id=validId(req.params.id);await assetById(id);
@@ -337,6 +402,7 @@ router.post('/:id/printer/toner',wrap(async(req,res)=>{
   if(!tx.committed) throw assetError(409,'Không cập nhật được tồn kho, vui lòng thử lại.');
   const current=tx.snapshot.val();
   if(!current.movements?.[movementId]) throw assetError(409,'Không tìm thấy phiếu xuất mực.');
+  await recordStockThreshold({...current,quantity:current.movements[movementId].before},current);
   // This multi-path write is idempotent and can be retried using the same operationId.
   const event={id:eventId,type:'replace_toner',summary:`Đổ 1 ${current.unit||'hộp'} ${current.name}`,
     notes:input.notes,date,cost:Number(current.unitPrice||0),performedBy:req.it.name||req.it.email,
@@ -379,6 +445,8 @@ router.post('/:id/maintenance',wrap(async(req,res)=>{
     const result=await conditionalUpdate(stockRef,old=>stockChange(old,{type:'issue',amount,recipient:`Bảo trì ${item.assetCode}`,
       reason:summary,assetId:id,performedBy,opId:operation,date}));
     if(!result.committed)throw assetError(409,'Không thể trừ vật tư từ kho.');
+    const afterStock=result.snapshot.val();
+    await recordStockThreshold({...afterStock,quantity:afterStock.movements?.[operation]?.before},afterStock);
     usedMovement={stockItemId,stockSku:stocked.sku,stockName:stocked.name,stockQuantity:amount,inventoryOperationId:operation};
   }
   const now=Date.now();

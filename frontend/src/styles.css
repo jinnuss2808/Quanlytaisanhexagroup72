@@ -163,3 +163,7 @@
 
 /* Requester role and ticket status feedback */
 .requester-level-control{display:grid;gap:7px;font-size:12px;font-weight:700;color:#475c7d;margin:13px 0}.requester-level-control select{background:#fff;border:1px solid #dfe6f2;border-radius:8px;padding:11px;color:#243a59}.requester-level-control small{font-weight:400;color:#8e667b;font-size:11px;line-height:1.5}.ticket-success-notice{display:flex;align-items:center;gap:8px;padding:13px 15px;border:1px solid #b4e9cf;background:#eaf9f0;border-radius:9px;color:#11754d;font-size:12px;margin:18px 0}
+
+/* Optional Ticket module: keep configuration sections visually separated. */
+.ticket-module-settings { margin-bottom: 20px; }
+.requester-disabled-icon { display:flex; align-items:center; justify-content:center; margin:12px auto; color:#2563eb; }

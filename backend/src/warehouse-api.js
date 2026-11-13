@@ -3,6 +3,8 @@ import { db } from './firebase.js';
 import { assetError, asText, assetUUID, keyForCode } from './asset-core.js';
 import { normalizeStockItem, quantity, stockChange, movementRows, STOCK_CATEGORIES } from './warehouse-core.js';
 import { transactExistingTicket as conditionalUpdate } from './ticket-transaction.js';
+import { lowStockItems } from './asset-ops.js';
+import { recordStockThreshold } from './stock-alerts.js';
 
 const router=express.Router();
 const wrap=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
@@ -11,6 +13,7 @@ const requireIT=(req,_res,next)=>['manager','agent'].includes(req.it?.role)&&req
 const getItems=async()=> (await db.ref('warehouseStock').get()).val()||{};
 const getItem=async id=>{const v=(await db.ref(`warehouseStock/${validId(id)}`).get()).val();if(!v||v.deletedAt)throw assetError(404,'Không tìm thấy mặt hàng.');return v;};
 router.use(requireIT);
+router.get('/alerts',wrap(async(_req,res)=>res.json({items:lowStockItems(await getItems())})));
 router.get('/',wrap(async(req,res)=>{
   const all=Object.values(await getItems()).filter(x=>!x.deletedAt);
   const kind=asText(req.query.category,30),q=asText(req.query.search,150).toLocaleLowerCase('vi');
@@ -29,6 +32,7 @@ router.post('/',wrap(async(req,res)=>{
   const item={id,...data,quantity:qty,createdAt:now,updatedAt:now,createdBy:req.it.uid,
     movements:qty?{[opId]:{id:opId,type:'opening',before:0,delta:qty,after:qty,recipient:'',reason:'Nhập tồn đầu kỳ',performedBy:req.it.name||req.it.email,at:now}}:{}};
   try{await db.ref(`warehouseStock/${id}`).set(item);}catch(err){await idx.remove().catch(()=>{});throw err;}
+  await recordStockThreshold({...item,quantity:Number(item.minQuantity??0)+1},item);
   res.status(201).json({...item,movements:undefined});
 }));
 router.patch('/:id',wrap(async(req,res)=>{
@@ -37,6 +41,7 @@ router.patch('/:id',wrap(async(req,res)=>{
   if(req.body?.sku&&asText(req.body.sku,100).toUpperCase()!==old.sku)throw assetError(400,'Không sửa mã kho, hãy tạo mặt hàng mới.');
   const next=await conditionalUpdate(db.ref(`warehouseStock/${id}`),v=>v&&!v.deletedAt?{...v,...data,updatedAt:Date.now()}:undefined);
   if(!next.committed)throw assetError(409,'Mặt hàng vừa thay đổi.');
+  await recordStockThreshold(old,next.snapshot.val());
   res.json({...next.snapshot.val(),movements:undefined});
 }));
 router.post('/:id/movements',wrap(async(req,res)=>{
@@ -46,7 +51,10 @@ router.post('/:id/movements',wrap(async(req,res)=>{
     reason:req.body?.reason,assetId:req.body?.assetId,performedBy:req.it.name||req.it.email||req.it.uid,date:req.body?.date,opId};
   const tx=await conditionalUpdate(db.ref(`warehouseStock/${id}`),v=>stockChange(v,input));
   if(!tx.committed)throw assetError(409,'Không thể cập nhật kho, thử lại.');
-  res.json({item:{...tx.snapshot.val(),movements:undefined},movement:tx.snapshot.val().movements[opId]});
+  const after=tx.snapshot.val();
+  const beforeQuantity=after.movements?.[opId]?.before;
+  await recordStockThreshold({...after,quantity:beforeQuantity},after);
+  res.json({item:{...after,movements:undefined},movement:after.movements[opId]});
 }));
 router.get('/:id/movements',wrap(async(req,res)=>res.json(movementRows(await getItem(req.params.id)))));
 router.delete('/:id',wrap(async(req,res)=>{

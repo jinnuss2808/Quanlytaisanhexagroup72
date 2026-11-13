@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef} from 'react';
 import { auth } from './firebase';
 import { api } from './api';
 import {
@@ -13,10 +13,11 @@ import {toggleColumnSort} from './table-sort.js';
 import WarehouseManagement from './WarehouseManagement.jsx';
 import PrinterManagement from './PrinterManagement.jsx';
 import QRCode from 'qrcode';
+import {AssetReportPanel,AssetStocktakePanel,AssetBackupPanel} from './AssetExtras.jsx';
 
 const BASE = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:4000').replace(/\/$/, '');
 const STATUS = {available:'Có sẵn',using:'Đang sử dụng',maintenance:'Bảo trì',broken:'Đã hỏng',liquidated:'Đã thanh lý'};
-const initialAsset = {assetCode:'',assetName:'',categoryId:'',ownerDepartmentId:'',ipAddress:'',serialNumber:'',purchaseDate:'',purchasePrice:'',status:'available',description:''};
+const initialAsset = {assetCode:'',assetName:'',categoryId:'',ownerDepartmentId:'',userDepartment:'',ipAddress:'',serialNumber:'',purchaseDate:'',purchasePrice:'',status:'available',description:''};
 const dateLabel = ms => ms ? new Date(ms).toLocaleString('vi-VN') : '—';
 const money = v => (v === '' || v === undefined || v === null) ? '—' : Number(v).toLocaleString('vi-VN') + ' ₫';
 const publicLink = publicId => `${window.location.origin}/assets/${publicId}`;
@@ -48,6 +49,7 @@ function AssetForm({item,catalogs,onClose,onSaved}){
         <Field label="Loại tài sản"><select value={form.categoryId} onChange={e=>setField(setForm,'categoryId',e.target.value)}><option value="">Chưa phân loại</option>{catalogs.categories.map(x=><option key={x.id} value={x.id}>{x.code} · {x.name}</option>)}</select></Field>
         <Field label="Tên tài sản" required wide><input required maxLength={255} value={form.assetName} onChange={e=>setField(setForm,'assetName',e.target.value)} placeholder="VD: Laptop Dell Latitude 5450"/></Field>
         <Field label="Công ty sở hữu"><select value={form.ownerDepartmentId} onChange={e=>setField(setForm,'ownerDepartmentId',e.target.value)}><option value="">Chưa xác định</option>{catalogs.departments.map(x=><option key={x.id} value={x.id}>{x.code} · {x.name}</option>)}</select></Field>
+        <Field label="Phòng ban sử dụng"><input maxLength={100} value={form.userDepartment||''} onChange={e=>setField(setForm,'userDepartment',e.target.value)} placeholder="VD: Kế toán / Kỹ thuật"/></Field>
         <Field label="Trạng thái"><select value={form.status} onChange={e=>setField(setForm,'status',e.target.value)}>{Object.entries(STATUS).filter(([key])=>item?.status==='using'||key!=='using').map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></Field>
         <Field label="Serial"><input maxLength={255} value={form.serialNumber} onChange={e=>setField(setForm,'serialNumber',e.target.value)}/></Field>
         <Field label="Địa chỉ IP"><input maxLength={50} value={form.ipAddress} onChange={e=>setField(setForm,'ipAddress',e.target.value)}/></Field>
@@ -62,15 +64,16 @@ function AssetForm({item,catalogs,onClose,onSaved}){
   </Modal>;
 }
 function AssignmentForm({item,onClose,onSaved}){
-  const isReturn=item.status==='using';const [name,setName]=useState('');const [date,setDate]=useState(new Date().toISOString().slice(0,10));const [note,setNote]=useState('');
+  const isReturn=item.status==='using';const [name,setName]=useState('');const [userDepartment,setUserDepartment]=useState(item.userDepartment||'');const [date,setDate]=useState(new Date().toISOString().slice(0,10));const [note,setNote]=useState('');
   const [busy,setBusy]=useState(false),[error,setError]=useState('');
   const submit=async e=>{e.preventDefault();setBusy(true);setError('');try{
-    await api(`/assets/${item.id}/${isReturn?'return':'assign'}`,{method:'POST',body:{assignedTo:name,date,note}});onSaved();
+    await api(`/assets/${item.id}/${isReturn?'return':'assign'}`,{method:'POST',body:{assignedTo:name,userDepartment,date,note}});onSaved();
   }catch(err){setError(err.message);}finally{setBusy(false);}};
   return <Modal title={isReturn?'Thu hồi tài sản':'Bàn giao tài sản'} subtitle={`${item.assetCode} · ${item.assetName}`} onClose={onClose}>
     <form className="am-form" onSubmit={submit}>
       {isReturn?<div className="am-highlight">Đang sử dụng: <strong>{item.assignedTo}</strong></div>:<Field label="Người nhận tài sản" required><input required value={name} onChange={e=>setName(e.target.value)} placeholder="Họ tên / Mã nhân viên"/></Field>}
       <Field label={isReturn?'Ngày thu hồi':'Ngày bàn giao'}><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></Field>
+      {!isReturn&&<Field label="Phòng ban sử dụng"><input maxLength={100} value={userDepartment} onChange={e=>setUserDepartment(e.target.value)} placeholder="VD: Kế toán"/></Field>}
       <Field label="Ghi chú"><textarea rows={3} value={note} onChange={e=>setNote(e.target.value)}/></Field>
       {error&&<p className="am-error">{error}</p>}
       <footer className="am-actions"><button type="button" className="am-btn am-light" onClick={onClose}>Hủy</button><button disabled={busy} className="am-btn am-primary">{busy?'Đang lưu...':'Xác nhận'}</button></footer>
@@ -221,7 +224,7 @@ function AssetDetail({item,onClose,onRefresh}){
         ['Trạng thái',STATUS[item.status]],['Người sử dụng',item.assignedTo||'—'],['Serial',item.serialNumber||'—'],['IP',item.ipAddress||'—'],
         ['Ngày mua',item.purchaseDate||'—'],['Giá mua',money(item.purchasePrice)],['Ghi chú',item.description||'—']].map(([label,value])=><div key={label}><small>{label}</small><strong>{value}</strong></div>)}</div>}
       {tab==='history'&&<><h4>Bàn giao / thu hồi</h4>{history.assignments.length?history.assignments.map(x=><div className="am-event" key={x.id}><ArrowRightLeft size={17}/><div><b>{x.assignedTo}</b><p>Bàn giao: {x.date} · {x.returnedAt?`Thu hồi: ${x.returnedDate||dateLabel(x.returnedAt)}`:'Đang sử dụng'}</p><small>{x.note||''}</small></div></div>):<p className="am-muted">Chưa có lịch sử bàn giao.</p>}
-        <h4>Nhật ký thay đổi</h4>{history.history.map(x=><div className="am-event" key={x.id}><History size={16}/><div><b>{x.summary||x.action}</b><p>{x.byName} · {dateLabel(x.at)}</p></div></div>)}</>}
+        <h4>Nhật ký thay đổi</h4>{history.history.map(x=><div className="am-event" key={x.id}><History size={16}/><div><b>{x.summary||x.action}</b><p>{x.byName} · {dateLabel(x.at)}</p>{Array.isArray(x.changes)&&x.changes.length>0&&<ul className="am-audit-changes">{x.changes.map(c=><li key={c.field}><strong>{c.label}</strong>: {String(c.from??'—')} → {String(c.to??'—')}</li>)}</ul>}</div></div>)}</>}
       {tab==='maintenance'&&<><div className="am-split"><div><h4>Sửa chữa, thay thế linh kiện và mực in</h4><p className="am-muted">Lưu lịch sử sửa chữa, chi phí, người thực hiện và số vật tư đã dùng.</p></div><button className="am-btn am-primary" onClick={()=>setAddMaintenance(true)}><Plus size={15}/> Ghi sửa chữa</button></div>
         {!history.maintenance?.length&&<p className="am-muted">Thiết bị chưa có nhật ký sửa chữa.</p>}
         {(history.maintenance||[]).map(x=><div className="am-maintenance-card" key={x.id}><strong>{x.summary} · {x.date}</strong><p>{x.notes||'Không có ghi chú chi tiết'}{x.replacedParts?' · Linh kiện: '+x.replacedParts:''}</p><small>{x.performedBy||x.byName} · Chi phí: {money(x.cost)}{x.stockName?` · Xuất kho: ${x.stockName} × ${x.stockQuantity}`:''}{x.ticketCode?' · Ticket: '+x.ticketCode:''}</small></div>)}
@@ -257,6 +260,18 @@ function ImportPanel({onSaved}){
   {error&&<p className="am-error">{error}</p>}
  </div>;
 }
+// HEXA_ASSET_TAB_VISIBILITY_V1: chỉ ẩn các TAB, không thay đổi dữ liệu Firebase.
+const HEXA_DEFAULT_HIDDEN_ASSET_TABS = ['stock', 'stocktake', 'reports'];
+function hexaReadHiddenAssetTabs(storageKey) {
+  try {
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved === null) return [...HEXA_DEFAULT_HIDDEN_ASSET_TABS];
+    const items = JSON.parse(saved);
+    return Array.isArray(items) ? items.filter(id => typeof id === 'string' && id !== 'assets') : [...HEXA_DEFAULT_HIDDEN_ASSET_TABS];
+  } catch {
+    return [...HEXA_DEFAULT_HIDDEN_ASSET_TABS];
+  }
+}
 export default function AssetManagement({user,initialTicket=null,onClearInitialTicket=()=>{}}){
   const [mode,setMode]=useState('assets'),[data,setData]=useState({items:[],total:0,page:1,pageSize:20,totalPages:1});
   const [catalogs,setCatalogs]=useState({categories:[],departments:[]}),[stats,setStats]=useState({total:0,available:0,using:0,maintenance:0,broken:0,liquidated:0});
@@ -264,6 +279,30 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   const [searchValue,setSearchValue]=useState(''),[editing,setEditing]=useState(undefined),[assigning,setAssigning]=useState(null),[detail,setDetail]=useState(null);
   const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[warehouseRefreshEpoch,setWarehouseRefreshEpoch]=useState(0);
   const isManager=user.role==='manager';
+  const hexaTabStorageKey = 'hexa.asset.hiddenTabs.v1:' + (user?.uid || user?.email || 'local');
+  const [hexaHiddenTabs, hexaSetHiddenTabs] = useState(() => hexaReadHiddenAssetTabs(hexaTabStorageKey));
+  const [hexaTabMenuOpen, hexaSetTabMenuOpen] = useState(false);
+  const hexaTabMenuRef = useRef(null);
+  useEffect(() => {
+    hexaSetHiddenTabs(hexaReadHiddenAssetTabs(hexaTabStorageKey));
+  }, [hexaTabStorageKey]);
+  useEffect(() => {
+    try { window.localStorage.setItem(hexaTabStorageKey, JSON.stringify(hexaHiddenTabs)); } catch {}
+  }, [hexaTabStorageKey, hexaHiddenTabs]);
+  useEffect(() => {
+    if (!hexaTabMenuOpen) return;
+    const onPointer = event => {if (!hexaTabMenuRef.current?.contains(event.target)) hexaSetTabMenuOpen(false);};
+    const onKey = event => {if (event.key === 'Escape') hexaSetTabMenuOpen(false);};
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {document.removeEventListener('pointerdown', onPointer); document.removeEventListener('keydown', onKey);};
+  }, [hexaTabMenuOpen]);
+  const hexaToggleTab = id => {
+    if (id === 'assets') return; // Không ẩn mục chính để luôn có nơi quay về.
+    hexaSetHiddenTabs(previous => previous.includes(id) ? previous.filter(x => x !== id) : [...previous, id]);
+    if (mode === id && !hexaHiddenTabs.includes(id)) setMode('assets');
+  };
+
   const toggleAssetSort=key=>setFilters(current=>{ const next=toggleColumnSort(current.sortBy,key); return {...current, sortBy:next, sortDirection:next?'asc':'', page:1 }; });
   const reloadCatalogs=useCallback(async()=>{setCatalogs(await api('/assets/catalogs'));},[]);
   const load=useCallback(async()=>{setLoading(true);try{
@@ -282,13 +321,28 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   const restore=async item=>{try{await api(`/assets/${item.id}/restore`,{method:'POST'});await refresh();}catch(err){setError(err.message);}};
   const xlsx=async()=>{try{download(await rawRequest('/assets/export.xlsx',{blob:true}),`DanhSachTaiSan_HEXA_${new Date().toISOString().slice(0,10)}.xlsx`);}catch(err){setError(err.message);}};
   useEffect(()=>{if(initialTicket){setMode('assets');setEditing({...initialAsset,assetName:initialTicket.itemName||initialTicket.subject,description:`Tham chiếu yêu cầu ${initialTicket.code||initialTicket.id}`});onClearInitialTicket();}},[initialTicket,onClearInitialTicket]);
-  const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['printers','Quản lý máy in',Wrench],['stock','Kho linh kiện',HardDrive],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload]]:[])];
+  const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['printers','Quản lý máy in',Wrench],['stock','Kho linh kiện',HardDrive],['stocktake','Kiểm kê QR',QrCode],['reports','Báo cáo tài sản',Building2],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload],['backups','Sao lưu',Download]]:[])];
+  const hexaVisibleModes = modes.filter(([id]) => id === 'assets' || !hexaHiddenTabs.includes(id));
   return <div className="am-root">
     <div className="am-split am-section-head"><div><p className="am-eyebrow">HEXA · INVENTORY</p><h2>Quản lý tài sản IT</h2><p>Một tài khoản đăng nhập · Dữ liệu tài sản và ticket cùng Firebase</p></div><div className="am-head-actions">{(mode==='assets'||mode==='trash')&&<button onClick={refresh} className="am-btn am-light"><RefreshCw size={16}/> Làm mới</button>}{mode==='assets'&&<button onClick={()=>setEditing(null)} className="am-btn am-primary"><Plus size={16}/> Thêm tài sản</button>}</div></div>
     <div className="am-stats">{[[Boxes,'Tổng tài sản',stats.total], [CheckCircle2,'Có sẵn',stats.available],[Laptop,'Đang sử dụng',stats.using],[Wrench,'Bảo trì',stats.maintenance],[AlertTriangle,'Đã hỏng',stats.broken]].map(([Icon,label,value])=><div key={label} className="am-stat"><div className="am-stat-icon"><Icon size={18}/></div><span>{label}</span><strong>{value}</strong></div>)}</div>
-    <div className="am-pill-tabs am-main-tabs">{modes.map(([id,label,Icon])=><button key={id} className={mode===id?'active':''} onClick={()=>{setError('');setNotice('');setMode(id);setFilters(f=>({...f,page:1}));}}><Icon size={15}/>{label}</button>)}</div>
+
+    <div className="am-tabs-toolbar">
+      <div className="am-pill-tabs am-main-tabs" role="tablist" aria-label="Các phân hệ quản lý tài sản">
+        {hexaVisibleModes.map(([id,label,Icon])=><button key={id} type="button" role="tab" aria-selected={mode===id} className={mode===id?'active':''} onClick={()=>{setError('');setNotice('');setMode(id);setFilters(f=>({...f,page:1}));}}><Icon size={15}/>{label}</button>)}
+      </div>
+      <div className="am-tab-settings" ref={hexaTabMenuRef}>
+        <button type="button" className="am-tab-settings-trigger" aria-expanded={hexaTabMenuOpen} aria-controls="hexa-tab-visibility-panel" onClick={()=>hexaSetTabMenuOpen(open=>!open)}><LayoutGrid size={16}/> Ẩn/hiện mục</button>
+        {hexaTabMenuOpen&&<div className="am-tab-visibility-panel" id="hexa-tab-visibility-panel" role="group" aria-label="Tùy chỉnh các mục hiển thị">
+          <div className="am-tab-visibility-head"><strong>Chọn mục cần hiển thị</strong><button type="button" onClick={()=>hexaSetTabMenuOpen(false)} aria-label="Đóng"><X size={16}/></button></div>
+          {modes.map(([id,label,Icon])=><label className="am-tab-visibility-option" key={id}><input type="checkbox" checked={id==='assets'||!hexaHiddenTabs.includes(id)} disabled={id==='assets'} onChange={()=>hexaToggleTab(id)}/><Icon size={15}/><span>{label}</span>{id==='assets'&&<small>Cố định</small>}</label>)}
+          <button type="button" className="am-tab-visibility-reset" onClick={()=>hexaSetHiddenTabs([])}>Hiện tất cả mục</button>
+        </div>}
+      </div>
+    </div>
     {error&&<div className="am-error am-banner">{error}<button onClick={()=>setError('')} aria-label="Đóng lỗi"><X size={15}/></button></div>}
     {notice&&<div className="am-success am-banner">{notice}<button onClick={()=>setNotice('')} aria-label="Đóng thông báo"><X size={15}/></button></div>}
+    <div className="am-tab-stage" key={mode} aria-label="Nội dung Quản lý tài sản">
     {(mode==='assets'||mode==='trash')&&<div className="am-card">
       <div className="am-filter-bar"><div className="am-search"><Search size={17}/><input placeholder="Tìm mã, tên, IP, serial, người dùng..." value={searchValue} onChange={e=>setSearchValue(e.target.value)}/></div>
         <select value={filters.ownerDepartmentId} onChange={e=>setFilters(f=>({...f,page:1,ownerDepartmentId:e.target.value}))}><option value="">Tất cả công ty</option>{catalogs.departments.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
@@ -315,8 +369,12 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
     </div>}
     {(mode==='warehouse'||mode==='stock')&&<WarehouseManagement kind={mode} refreshEpoch={warehouseRefreshEpoch} onAssignAsset={setAssigning} onShowAsset={setDetail}/>}
     {mode==='printers'&&<PrinterManagement refreshEpoch={warehouseRefreshEpoch}/> }
+    {mode==='reports'&&<AssetReportPanel/>}
+    {mode==='stocktake'&&<AssetStocktakePanel catalogs={catalogs.departments} isManager={isManager}/>}
+    {mode==='backups'&&isManager&&<AssetBackupPanel/>}
     {mode==='catalogs'&&isManager&&<CatalogManager catalogs={catalogs} onSaved={reloadCatalogs}/>} 
     {mode==='import'&&isManager&&<ImportPanel onSaved={refresh}/>}
+    </div>
     {editing!==undefined&&<AssetForm item={editing} catalogs={catalogs} onClose={()=>setEditing(undefined)} onSaved={saved}/>}
     {assigning&&<AssignmentForm item={assigning} onClose={()=>setAssigning(null)} onSaved={saved}/>}
     {detail&&<AssetDetail item={detail} onClose={()=>setDetail(null)} onRefresh={refresh}/>}

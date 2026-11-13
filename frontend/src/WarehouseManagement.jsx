@@ -59,7 +59,7 @@ export default function WarehouseManagement({kind='warehouse',onAssignAsset,onSh
  const [stock,setStock]=useState({items:[],total:0,alerts:0}),[devices,setDevices]=useState([]),[term,setTerm]=useState(''),[category,setCategory]=useState('all');
  const [devicePage,setDevicePage]=useState(1),[devicePages,setDevicePages]=useState(1),[deviceTotal,setDeviceTotal]=useState(0),[debouncedSearch,setDebouncedSearch]=useState('');
  const [stockSort,setStockSort]=useState(''),[deviceSort,setDeviceSort]=useState('');
- const [editor,setEditor]=useState(undefined),[transaction,setTransaction]=useState(null),[history,setHistory]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
+ const [onlyLow,setOnlyLow]=useState(false),[editor,setEditor]=useState(undefined),[transaction,setTransaction]=useState(null),[history,setHistory]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const reload=useCallback(async()=>{setLoading(true);try{
   const [list,assets]=await Promise.all([api('/warehouse'),kind==='warehouse'?api(`/assets?status=available&pageSize=50&page=${devicePage}&search=${encodeURIComponent(debouncedSearch)}${deviceSort?`&sortBy=${encodeURIComponent(deviceSort)}&sortDirection=asc`:''}`):Promise.resolve({items:[]})]);
   setStock({...list,items:Array.isArray(list?.items)?list.items:[]});setDevices(Array.isArray(assets?.items)?assets.items:[]);setDevicePages(assets.totalPages||1);setDeviceTotal(assets.total||0);setError('');
@@ -69,7 +69,7 @@ export default function WarehouseManagement({kind='warehouse',onAssignAsset,onSh
  // Nút Thêm mực ở thanh công cụ chung mở biểu mẫu kho mực.
  useEffect(()=>{if(kind==='ink'&&openCreateSignal>0)setEditor(null)},[kind,openCreateSignal]);
  const onlyInk=kind==='ink',safeItems=Array.isArray(stock?.items)?stock.items:[],stocked=useMemo(()=>safeItems.filter(x=>(onlyInk?x.category==='ink':kind==='warehouse'?x.category!=='ink':true)
-    &&(category==='all'||x.category===category)&&(!term||[x.sku,x.name,x.location,x.owner].some(v=>String(v||'').toLocaleLowerCase('vi').includes(term.toLocaleLowerCase('vi'))))),[safeItems,kind,category,term]);
+    &&(category==='all'||x.category===category)&&(!onlyLow||Number(x.quantity)<=Number(x.minQuantity??0))&&(!term||[x.sku,x.name,x.location,x.owner].some(v=>String(v||'').toLocaleLowerCase('vi').includes(term.toLocaleLowerCase('vi'))))),[safeItems,kind,category,term,onlyLow]);
  const summaryInk=safeItems.filter(x=>x.category==='ink');
  const visibleTotal=onlyInk?summaryInk.length:stock.total;
  const visibleAlerts=onlyInk?summaryInk.filter(x=>x.quantity<=x.minQuantity).length:stock.alerts;
@@ -85,7 +85,8 @@ export default function WarehouseManagement({kind='warehouse',onAssignAsset,onSh
  const saved=()=>{setEditor(undefined);setTransaction(null);reload()};
  return <div className="am-warehouse">
  {!embedded&&<div className="am-split am-heading"><div><h3>{onlyInk?'Quản lý mực in':kind==='warehouse'?'Kho thiết bị IT':'Kho vật tư và linh kiện'}</h3><p>Quản lý số lượng tồn, nhập xuất cấp phát và lịch sử từng vật tư</p></div><div className="am-head-actions"><button className="am-btn am-light" onClick={reload}><RefreshCw size={15}/>Làm mới</button><button className="am-btn am-primary" onClick={()=>setEditor(null)}><Plus size={15}/>{onlyInk?'Thêm mực':'Thêm hàng'}</button></div></div>}
- <div className="am-warehouse-summary"><div><Boxes size={18}/> {visibleTotal} mã {onlyInk?'mực':'vật tư'}</div><div><AlertTriangle size={18}/> {visibleAlerts} mã cần nhập thêm</div></div>
+ <div className="am-warehouse-summary"><div><Boxes size={18}/> {visibleTotal} mã {onlyInk?'mực':'vật tư'}</div><button type="button" className={onlyLow?'am-btn am-primary':'am-btn am-light'} onClick={()=>setOnlyLow(v=>!v)}><AlertTriangle size={18}/> {visibleAlerts} mã cần nhập thêm {onlyLow?'· Đang lọc':''}</button></div>
+ {visibleAlerts>0&&<div className="am-alert-line" role="status"><AlertTriangle size={16}/> Cảnh báo tồn kho: {safeItems.filter(x=>(onlyInk?x.category==='ink':kind==='warehouse'?x.category!=='ink':true)&&Number(x.quantity)<=Number(x.minQuantity??0)).slice(0,5).map(x=>`${x.sku} (${x.quantity}/${x.minQuantity||0})`).join(' · ')}. Nhấn nhãn cảnh báo để lọc.</div>}
  <div className="am-filter-bar am-warehouse-filter"><div className="am-search"><Search size={16}/><input placeholder="Tìm mã, tên vật tư, vị trí kho..." value={term} onChange={e=>setTerm(e.target.value)}/></div>
  {!onlyInk&&<select value={category} onChange={e=>setCategory(e.target.value)}><option value="all">Tất cả nhóm</option>{Object.entries(CATEGORIES).filter(([k])=>kind==='warehouse'?k!=='ink':true).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select>}
  </div>
