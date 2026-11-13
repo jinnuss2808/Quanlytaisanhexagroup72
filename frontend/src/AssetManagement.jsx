@@ -8,6 +8,8 @@ import {
   ImagePlus, Monitor, PackageSearch, ChevronLeft, ChevronRight, Info
 } from 'lucide-react';
 import './asset-management.css';
+import SortableHeader from './SortableHeader.jsx';
+import {toggleColumnSort} from './table-sort.js';
 import WarehouseManagement from './WarehouseManagement.jsx';
 import PrinterManagement from './PrinterManagement.jsx';
 import QRCode from 'qrcode';
@@ -262,6 +264,7 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   const [searchValue,setSearchValue]=useState(''),[editing,setEditing]=useState(undefined),[assigning,setAssigning]=useState(null),[detail,setDetail]=useState(null);
   const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[warehouseRefreshEpoch,setWarehouseRefreshEpoch]=useState(0);
   const isManager=user.role==='manager';
+  const toggleAssetSort=key=>setFilters(current=>{ const next=toggleColumnSort(current.sortBy,key); return {...current, sortBy:next, sortDirection:next?'asc':'', page:1 }; });
   const reloadCatalogs=useCallback(async()=>{setCatalogs(await api('/assets/catalogs'));},[]);
   const load=useCallback(async()=>{setLoading(true);try{
     const params=new URLSearchParams();for(const [k,v] of Object.entries(filters))if(v!==''&&v!=null)params.set(k,String(v));
@@ -293,7 +296,15 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
         <select value={filters.status} onChange={e=>setFilters(f=>({...f,page:1,status:e.target.value}))}><option value="">Mọi trạng thái</option>{Object.entries(STATUS).map(([code,label])=><option key={code} value={code}>{label}</option>)}</select>
         <button className="am-btn am-light" onClick={xlsx}><Download size={15}/> Xuất Excel</button>
       </div>
-      <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã tài sản</th><th>Loại / Tên tài sản</th><th>Công ty sở hữu</th><th>Người sử dụng</th><th>Serial / IP</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+      <div className="am-table-wrap"><table className="am-table"><thead><tr>
+        <SortableHeader label="Mã tài sản" sortKey="assetCode" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
+        <SortableHeader label="Loại / Tên tài sản" sortKey="assetName" activeKey={filters.sortBy} onToggle={toggleAssetSort} title="Sắp xếp theo tên tài sản; nhấn lần nữa để bỏ sắp xếp"/>
+        <SortableHeader label="Công ty sở hữu" sortKey="ownerDepartmentName" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
+        <SortableHeader label="Người sử dụng" sortKey="assignedTo" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
+        <SortableHeader label="Serial / IP" sortKey="serialOrIp" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
+        <SortableHeader label="Trạng thái" sortKey="status" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
+        <th scope="col">Thao tác</th>
+      </tr></thead>
         <tbody>{data.items.map(item=><tr key={item.id}><td><button className="am-link strong" onClick={()=>setDetail(item)}>{item.assetCode}</button></td><td><b>{item.assetName}</b><small>{item.categoryName||'Chưa phân loại'}</small></td><td>{item.ownerDepartmentName||'—'}</td><td>{item.assignedTo||'—'}</td><td>{item.serialNumber||'—'}<small>{item.ipAddress||''}</small></td><td><span className={`am-status ${item.status}`}>{STATUS[item.status]||item.status}</span></td><td><div className="am-row-actions">
           {mode==='assets'?<><button title="Chi tiết / Lịch sử" onClick={()=>setDetail(item)}><History size={15}/></button><button title="Mã QR" onClick={()=>setDetail({...item,initialTab:'qr'})}><QrCode size={15}/></button><button title="Sửa" onClick={()=>setEditing(item)}><Pencil size={15}/></button><button title={item.status==='using'?'Thu hồi':'Bàn giao'} onClick={()=>setAssigning(item)}><ArrowRightLeft size={15}/></button><button title="Xóa mềm" onClick={()=>remove(item)}><Trash2 size={15}/></button></>:<button className="am-btn am-light" onClick={()=>restore(item)}><RotateCcw size={15}/> Khôi phục</button>}
           </div></td></tr>)}

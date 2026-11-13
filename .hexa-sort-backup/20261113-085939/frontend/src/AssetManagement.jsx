@@ -1,0 +1,323 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { auth } from './firebase';
+import { api } from './api';
+import {
+  Boxes, Box, Laptop, Plus, Search, Upload, Download, Pencil, Trash2, RotateCcw,
+  ArrowRightLeft, History, QrCode, X, RefreshCw, Save, CheckCircle2,
+  LayoutGrid, Wrench, AlertTriangle, Building2, Tags, HardDrive, Copy, ExternalLink,
+  ImagePlus, Monitor, PackageSearch, ChevronLeft, ChevronRight, Info
+} from 'lucide-react';
+import './asset-management.css';
+import WarehouseManagement from './WarehouseManagement.jsx';
+import PrinterManagement from './PrinterManagement.jsx';
+import QRCode from 'qrcode';
+
+const BASE = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:4000').replace(/\/$/, '');
+const STATUS = {available:'Có sẵn',using:'Đang sử dụng',maintenance:'Bảo trì',broken:'Đã hỏng',liquidated:'Đã thanh lý'};
+const initialAsset = {assetCode:'',assetName:'',categoryId:'',ownerDepartmentId:'',ipAddress:'',serialNumber:'',purchaseDate:'',purchasePrice:'',status:'available',description:''};
+const dateLabel = ms => ms ? new Date(ms).toLocaleString('vi-VN') : '—';
+const money = v => (v === '' || v === undefined || v === null) ? '—' : Number(v).toLocaleString('vi-VN') + ' ₫';
+const publicLink = publicId => `${window.location.origin}/assets/${publicId}`;
+const setField = (set,key,value)=>set(old=>({...old,[key]:value}));
+async function rawRequest(path, {method='GET',body,headers={},blob=false}={}) {
+  if(!auth.currentUser)throw new Error('Bạn cần đăng nhập tài khoản IT.');
+  const token=await auth.currentUser.getIdToken();
+  let response;
+  try{response=await fetch(`${BASE}/api${path}`,{method,headers:{Authorization:`Bearer ${token}`,...headers},body});}
+  catch{throw new Error('Không kết nối được máy chủ quản lý tài sản.');}
+  if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||`HTTP ${response.status}`);}
+  return blob ? response.blob() : response.json();
+}
+function download(blob,file){const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=file;link.click();URL.revokeObjectURL(url);}
+function Field({label,required,children,wide}){return <label className={'am-field'+(wide?' am-wide':'')}><span>{label}{required&&' *'}</span>{children}</label>;}
+function Modal({title,subtitle,onClose,children,wide=false,fixedDetail=false}){return <div className="am-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()} role="presentation"><div className={'am-modal'+(wide?' am-large':'')+(fixedDetail?' am-detail-fixed':'')} role="dialog" aria-modal="true" aria-label={title}><header className="am-modal-header"><div><div className="am-eyebrow">HEXA · QUẢN LÝ TÀI SẢN</div><h2>{title}</h2>{subtitle&&<p>{subtitle}</p>}</div><button className="am-icon-btn" onClick={onClose} aria-label="Đóng"><X size={20}/></button></header>{children}</div></div>;}
+function AssetForm({item,catalogs,onClose,onSaved}){
+  const edit=Boolean(item?.id);
+  const [form,setForm]=useState(item?Object.fromEntries(Object.keys(initialAsset).map(k=>[k,item[k]??''])):initialAsset);
+  const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  const submit=async e=>{e.preventDefault();setBusy(true);setError('');try{
+    await api(edit?`/assets/${item.id}`:'/assets',{method:edit?'PATCH':'POST',body:{...form,purchasePrice:form.purchasePrice===''?null:form.purchasePrice}});
+    onSaved();
+  }catch(err){setError(err.message);}finally{setBusy(false);}};
+  return <Modal title={edit?'Chỉnh sửa tài sản':'Thêm tài sản mới'} subtitle="Thông tin lưu trực tiếp trên Firebase Realtime Database" onClose={onClose} wide>
+    <form className="am-form" onSubmit={submit}>
+      <div className="am-form-grid">
+        <Field label="Mã tài sản" required><input required maxLength={100} value={form.assetCode} onChange={e=>setField(setForm,'assetCode',e.target.value)} placeholder="VD: HEXA-LAP-001"/></Field>
+        <Field label="Loại tài sản"><select value={form.categoryId} onChange={e=>setField(setForm,'categoryId',e.target.value)}><option value="">Chưa phân loại</option>{catalogs.categories.map(x=><option key={x.id} value={x.id}>{x.code} · {x.name}</option>)}</select></Field>
+        <Field label="Tên tài sản" required wide><input required maxLength={255} value={form.assetName} onChange={e=>setField(setForm,'assetName',e.target.value)} placeholder="VD: Laptop Dell Latitude 5450"/></Field>
+        <Field label="Công ty sở hữu"><select value={form.ownerDepartmentId} onChange={e=>setField(setForm,'ownerDepartmentId',e.target.value)}><option value="">Chưa xác định</option>{catalogs.departments.map(x=><option key={x.id} value={x.id}>{x.code} · {x.name}</option>)}</select></Field>
+        <Field label="Trạng thái"><select value={form.status} onChange={e=>setField(setForm,'status',e.target.value)}>{Object.entries(STATUS).filter(([key])=>item?.status==='using'||key!=='using').map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></Field>
+        <Field label="Serial"><input maxLength={255} value={form.serialNumber} onChange={e=>setField(setForm,'serialNumber',e.target.value)}/></Field>
+        <Field label="Địa chỉ IP"><input maxLength={50} value={form.ipAddress} onChange={e=>setField(setForm,'ipAddress',e.target.value)}/></Field>
+        <Field label="Ngày mua"><input type="date" value={form.purchaseDate} onChange={e=>setField(setForm,'purchaseDate',e.target.value)}/></Field>
+        <Field label="Giá mua (VNĐ)"><input type="number" min="0" step="0.01" value={form.purchasePrice} onChange={e=>setField(setForm,'purchasePrice',e.target.value)}/></Field>
+        <Field label="Ghi chú" wide><textarea rows={3} value={form.description} onChange={e=>setField(setForm,'description',e.target.value)}/></Field>
+      </div>
+      <div className="am-note"><Info size={15}/> Công ty sở hữu không tự thay đổi khi bàn giao. Chỉnh người sử dụng qua chức năng “Bàn giao / Thu hồi” để lưu lịch sử.</div>
+      {error&&<p className="am-error">{error}</p>}
+      <footer className="am-actions"><button type="button" className="am-btn am-light" onClick={onClose}>Hủy</button><button disabled={busy} className="am-btn am-primary"><Save size={16}/>{busy?'Đang lưu...':'Lưu tài sản'}</button></footer>
+    </form>
+  </Modal>;
+}
+function AssignmentForm({item,onClose,onSaved}){
+  const isReturn=item.status==='using';const [name,setName]=useState('');const [date,setDate]=useState(new Date().toISOString().slice(0,10));const [note,setNote]=useState('');
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const submit=async e=>{e.preventDefault();setBusy(true);setError('');try{
+    await api(`/assets/${item.id}/${isReturn?'return':'assign'}`,{method:'POST',body:{assignedTo:name,date,note}});onSaved();
+  }catch(err){setError(err.message);}finally{setBusy(false);}};
+  return <Modal title={isReturn?'Thu hồi tài sản':'Bàn giao tài sản'} subtitle={`${item.assetCode} · ${item.assetName}`} onClose={onClose}>
+    <form className="am-form" onSubmit={submit}>
+      {isReturn?<div className="am-highlight">Đang sử dụng: <strong>{item.assignedTo}</strong></div>:<Field label="Người nhận tài sản" required><input required value={name} onChange={e=>setName(e.target.value)} placeholder="Họ tên / Mã nhân viên"/></Field>}
+      <Field label={isReturn?'Ngày thu hồi':'Ngày bàn giao'}><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></Field>
+      <Field label="Ghi chú"><textarea rows={3} value={note} onChange={e=>setNote(e.target.value)}/></Field>
+      {error&&<p className="am-error">{error}</p>}
+      <footer className="am-actions"><button type="button" className="am-btn am-light" onClick={onClose}>Hủy</button><button disabled={busy} className="am-btn am-primary">{busy?'Đang lưu...':'Xác nhận'}</button></footer>
+    </form>
+  </Modal>;
+}
+function CatalogManager({catalogs,onSaved}){
+  const [kind,setKind]=useState('categories'),[code,setCode]=useState(''),[name,setName]=useState(''),[description,setDescription]=useState(''),[editing,setEditing]=useState(null);
+  const [error,setError]=useState(''),[working,setWorking]=useState(false);
+  const rows=catalogs[kind];
+  const reset=()=>{setCode('');setName('');setDescription('');setEditing(null);};
+  const submit=async e=>{e.preventDefault();setWorking(true);setError('');try{
+    await api(`/assets/catalogs/${kind}${editing?'/'+editing:''}`,{method:editing?'PATCH':'POST',body:{code,name,description}});reset();await onSaved();
+  }catch(err){setError(err.message);}finally{setWorking(false);}};
+  const remove=async row=>{if(!window.confirm(`Xóa danh mục “${row.name}”?`))return;setError('');try{await api(`/assets/catalogs/${kind}/${row.id}`,{method:'DELETE'});await onSaved();}catch(err){setError(err.message);}};
+  return <div className="am-card am-padded">
+    <div className="am-split am-heading"><div><h3>Danh mục tài sản</h3><p>Admin quản lý công ty sở hữu và loại thiết bị</p></div><div className="am-pill-tabs"><button className={kind==='categories'?'active':''} onClick={()=>{reset();setKind('categories');}}>Loại tài sản</button><button className={kind==='departments'?'active':''} onClick={()=>{reset();setKind('departments');}}>Công ty</button></div></div>
+    <form className="am-catalog-form" onSubmit={submit}>
+      <input required placeholder="Mã (LAPTOP, HEXA...)" maxLength={50} value={code} onChange={e=>setCode(e.target.value)}/>
+      <input required placeholder="Tên danh mục" maxLength={255} value={name} onChange={e=>setName(e.target.value)}/>
+      <input placeholder="Mô tả (không bắt buộc)" maxLength={500} value={description} onChange={e=>setDescription(e.target.value)}/>
+      <button className="am-btn am-primary" disabled={working}>{editing?'Lưu':'Thêm'}</button>
+      {editing&&<button type="button" className="am-btn am-light" onClick={reset}>Hủy</button>}
+    </form>
+    {error&&<p className="am-error">{error}</p>}
+    <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã</th><th>Tên</th><th>Mô tả</th><th>Thao tác</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td><strong>{r.code}</strong></td><td>{r.name}</td><td>{r.description||'—'}</td><td><button className="am-link" onClick={()=>{setEditing(r.id);setCode(r.code);setName(r.name);setDescription(r.description||'');}}>Sửa</button><button className="am-link danger" onClick={()=>remove(r)}>Xóa</button></td></tr>)}</tbody></table></div>
+  </div>;
+}
+function AssetPhoto({assetId,image}){
+  const [src,setSrc]=useState('');
+  useEffect(()=>{let alive=true,url='';(async()=>{
+    const blob=await rawRequest(`/assets/${assetId}/images/${image.id}/file`,{blob:true});
+    url=URL.createObjectURL(blob);if(alive)setSrc(url);else URL.revokeObjectURL(url);
+  })().catch(()=>{});return()=>{alive=false;if(url)URL.revokeObjectURL(url);};},[assetId,image.id]);
+  return src?<img className="am-photo" src={src} alt="Hình ảnh tài sản"/>:<div className="am-photo am-photo-empty">Không xem được ảnh</div>;
+}
+function MaintenanceEditor({item,onClose,onSaved}){
+  const [form,setForm]=useState({type:'repair',date:new Date().toISOString().slice(0,10),summary:'',notes:'',replacedParts:'',performedBy:'',serviceProvider:'',cost:'0',ticketCode:'',stockItemId:'',stockQuantity:'1'});
+  const [stock,setStock]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  useEffect(()=>{api('/warehouse').then(x=>setStock(x.items||[])).catch(()=>{});},[]);
+  const change=(key,value)=>setForm(f=>({...f,[key]:value}));
+  const submit=async e=>{e.preventDefault();setBusy(true);setError('');try{
+    await api(`/assets/${item.id}/maintenance`,{method:'POST',body:{...form,cost:Number(form.cost||0),stockQuantity:Number(form.stockQuantity)}});onSaved();
+  }catch(err){setError(err.message)}finally{setBusy(false)}};
+  const isPrinter=/máy\s*in|printer/i.test(`${item.categoryName||''} ${item.assetName||''}`);
+  return <Modal title="Ghi nhận sửa chữa / thay linh kiện" subtitle={`${item.assetCode} · ${item.assetName}`} onClose={onClose} wide><form className="am-form" onSubmit={submit}>
+  <div className="am-form-grid">
+    <Field label="Loại công việc"><select value={form.type} onChange={e=>change('type',e.target.value)}>
+      <option value="repair">Sửa chữa thiết bị</option><option value="maintenance">Bảo trì định kỳ</option><option value="replace_part">Thay thế linh kiện</option><option value="printer_service">Sửa chữa / vệ sinh máy in</option><option value="replace_toner">Thay mực in</option>
+    </select></Field>
+    <Field label="Ngày thực hiện"><input type="date" required value={form.date} onChange={e=>change('date',e.target.value)}/></Field>
+    <Field label="Mô tả công việc" wide required><input required maxLength={255} value={form.summary} onChange={e=>change('summary',e.target.value)} placeholder="VD: Thay trống máy in, sửa lỗi kẹt giấy..."/></Field>
+    <Field label="Linh kiện thay thế"><input value={form.replacedParts} onChange={e=>change('replacedParts',e.target.value)} placeholder="Trống, gạt, RAM, SSD..."/></Field>
+    <Field label="Người thực hiện"><input value={form.performedBy} onChange={e=>change('performedBy',e.target.value)} placeholder="Tên kỹ thuật viên"/></Field>
+    <Field label="Đơn vị sửa chữa"><input value={form.serviceProvider} onChange={e=>change('serviceProvider',e.target.value)} placeholder="IT nội bộ / Nhà cung cấp"/></Field>
+    <Field label="Chi phí (VNĐ)"><input type="number" min="0" value={form.cost} onChange={e=>change('cost',e.target.value)}/></Field>
+    <Field label="Mã ticket liên quan"><input value={form.ticketCode} onChange={e=>change('ticketCode',e.target.value)}/></Field>
+    <Field label="Dùng vật tư/mực trong kho"><select value={form.stockItemId} onChange={e=>change('stockItemId',e.target.value)}><option value="">Không xuất từ kho</option>{stock.filter(i=>i.quantity>0 && (form.type!=='replace_toner'||i.category==='ink')).map(i=><option key={i.id} value={i.id}>{i.sku} · {i.name} (tồn {i.quantity})</option>)}</select></Field>
+    {form.stockItemId&&<Field label="Số lượng xuất kho"><input type="number" required min="1" step="1" value={form.stockQuantity} onChange={e=>change('stockQuantity',e.target.value)}/></Field>}
+    <Field label="Ghi chú chi tiết" wide><textarea rows={3} value={form.notes} onChange={e=>change('notes',e.target.value)} placeholder="Lỗi trước/sau sửa, serial linh kiện, tình trạng máy..."/></Field>
+  </div>
+  {isPrinter&&<div className="am-note">Đối với máy in, bạn có thể ghi lại thay mực, thay trống, gạt mực, bánh răng, bảo trì và chi phí từng lần.</div>}
+  {error&&<p className="am-error">{error}</p>}
+  <footer className="am-actions"><button className="am-btn am-light" type="button" onClick={onClose}>Hủy</button><button className="am-btn am-primary" disabled={busy}><Save size={16}/>{busy?'Đang lưu...':'Lưu nhật ký'}</button></footer>
+  </form></Modal>;
+}
+// QR được sinh trực tiếp trong trình duyệt, không gửi thông tin tài sản tới dịch vụ QR bên ngoài.
+export function AssetQrLabel({item,url}) {
+  const [qr,setQr] = useState('');
+  const [error,setError] = useState('');
+  useEffect(()=>{
+    let alive=true;
+    setQr('');setError('');
+    QRCode.toDataURL(url,{width:340,margin:2,errorCorrectionLevel:'M',color:{dark:'#122746',light:'#FFFFFF'}})
+      .then(data=>{if(alive)setQr(data);})
+      .catch(()=>{if(alive)setError('Không tạo được mã QR. Vui lòng thử lại.');});
+    return ()=>{alive=false;};
+  },[url]);
+  const saveQr=()=>{
+    if(!qr)return;
+    const a=document.createElement('a');
+    a.download=`HEXA-QR-${String(item.assetCode||item.id).replace(/[^a-zA-Z0-9_-]/g,'_')}.png`;
+    a.href=qr;
+    document.body.appendChild(a);a.click();a.remove();
+  };
+  const printQr=()=>{
+    if(!qr)return;
+    const popup=window.open('','_blank','width=560,height=680');
+    if(!popup){setError('Trình duyệt đang chặn cửa sổ in. Hãy cho phép pop-up để in tem.');return;}
+    popup.document.title=`Tem QR - ${item.assetCode}`;
+    const css=popup.document.createElement('style');
+    css.textContent='@page{size:auto;margin:10mm}body{font-family:Arial,sans-serif;margin:25px;color:#172747}.label{width:300px;margin:auto;border:1px solid #ddd;border-radius:8px;padding:20px;text-align:center;break-inside:avoid}.label img{width:220px;height:220px;display:block;margin:10px auto}.brand{font-size:18px;font-weight:800}.code{font-size:17px;font-weight:bold;overflow-wrap:anywhere;margin-top:6px}.name{font-size:12px;line-height:1.5;overflow-wrap:anywhere}.hint{font-size:10px;color:#5a6880}';
+    popup.document.head.appendChild(css);
+    const label=popup.document.createElement('div');label.className='label';
+    const brand=popup.document.createElement('div');brand.className='brand';brand.textContent='HEXA · TÀI SẢN';label.appendChild(brand);
+    const img=popup.document.createElement('img');img.alt='Mã QR tài sản';img.src=qr;label.appendChild(img);
+    const code=popup.document.createElement('div');code.className='code';code.textContent=item.assetCode||'';label.appendChild(code);
+    const name=popup.document.createElement('div');name.className='name';name.textContent=item.assetName||'';label.appendChild(name);
+    const hint=popup.document.createElement('p');hint.className='hint';hint.textContent='Quét mã để xem thông tin tài sản';label.appendChild(hint);
+    popup.document.body.appendChild(label);
+    let printed=false;
+    const doPrint=()=>{if(printed)return;printed=true;popup.focus();popup.print();};
+    img.onload=doPrint;
+    if(img.complete)doPrint();
+  };
+  return <div className="am-qr-layout">
+    <div className="am-qr-label">
+      {qr?<img className="am-qr-image" src={qr} alt={`QR của tài sản ${item.assetCode}`}/>:<div className="am-qr-placeholder">Đang tạo mã QR...</div>}
+      <strong>{item.assetCode}</strong><span>{item.assetName}</span>
+    </div>
+    <div className="am-qr-description">
+      <h4>Mã QR của tài sản</h4>
+      <p className="am-muted">Quét mã để mở trang thông tin công khai của tài sản này. Mã QR được tạo trên máy, không cần dịch vụ bên ngoài.</p>
+      <div className="am-url">{url}</div>
+      <div className="am-qr-actions">
+        <button type="button" className="am-btn am-primary" onClick={saveQr} disabled={!qr}><Download size={15}/> Tải QR PNG</button>
+        <button type="button" className="am-btn am-light" onClick={printQr} disabled={!qr}><QrCode size={15}/> In tem QR</button>
+        <button type="button" className="am-btn am-light" onClick={()=>navigator.clipboard?.writeText(url).then(()=>setError('Đã sao chép liên kết.')).catch(()=>setError('Không thể sao chép. Hãy sao chép thủ công.'))}><Copy size={15}/> Sao chép link</button>
+        <a className="am-btn am-light" target="_blank" rel="noreferrer" href={url}><ExternalLink size={15}/> Xem tài sản</a>
+      </div>
+      <p className="am-muted">Lưu ý: nếu website đang chạy localhost, mã QR chỉ dùng được trên máy đó. Hãy tải/in lại mã QR sau khi triển khai lên tên miền Vercel.</p>
+      {error&&<p role="status" className={error.startsWith('Đã ')?'am-success':'am-error'}>{error}</p>}
+    </div>
+  </div>;
+}
+function AssetDetail({item,onClose,onRefresh}){
+  const [tab,setTab]=useState(item.initialTab||'info'),[history,setHistory]=useState({history:[],assignments:[],maintenance:[]}),[software,setSoftware]=useState([]),[images,setImages]=useState([]);
+  const [name,setName]=useState(''),[version,setVersion]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[addMaintenance,setAddMaintenance]=useState(false);
+  const reload=useCallback(async()=>{
+    const h=await api(`/assets/${item.id}/history`);setHistory(h);
+    if(!item.deletedAt){const [s,i]=await Promise.all([api(`/assets/${item.id}/software`),api(`/assets/${item.id}/images`)]);setSoftware(s);setImages(i);}
+  },[item.id]);
+  useEffect(()=>{reload().catch(err=>setMessage(err.message));},[reload]);
+  const addSoftware=async e=>{e.preventDefault();setBusy(true);setMessage('');try{await api(`/assets/${item.id}/software`,{method:'POST',body:{softwareName:name,version}});setName('');setVersion('');await reload();}catch(err){setMessage(err.message);}finally{setBusy(false);}};
+  const upload=async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;
+    setBusy(true);setMessage('');try{
+      if(file.size>5*1024*1024)throw new Error('Ảnh phải nhỏ hơn 5 MB.');
+      await rawRequest(`/assets/${item.id}/images`,{method:'POST',headers:{'Content-Type':file.type},body:file});await reload();
+    }catch(err){setMessage(err.message);}finally{setBusy(false);}};
+  const removeImage=async im=>{if(!window.confirm('Xóa ảnh này?'))return;try{await api(`/assets/${item.id}/images/${im.id}`,{method:'DELETE'});await reload();}catch(err){setMessage(err.message);}};
+  const removeSoftware=async sw=>{if(!window.confirm('Xóa phần mềm này?'))return;try{await api(`/assets/${item.id}/software/${sw.id}`,{method:'DELETE'});await reload();}catch(err){setMessage(err.message);}};
+  const url=publicLink(item.publicId);
+  return <Modal title={item.assetName} subtitle={item.assetCode} onClose={onClose} wide fixedDetail>
+    <div className="am-pill-tabs am-detail-tabs">{[['info','Thông tin'],['history','Lịch sử'],['maintenance','Sửa chữa / thay linh kiện'],['software','Phần mềm'],['images','Hình ảnh'],['qr','Mã QR / liên kết']].map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</div>
+    <div className="am-detail-body">
+      {tab==='info'&&<div className="am-detail-grid">{[
+        ['Mã tài sản',item.assetCode],['Tên tài sản',item.assetName],['Loại',item.categoryName||'—'],['Công ty sở hữu',item.ownerDepartmentName||'—'],
+        ['Trạng thái',STATUS[item.status]],['Người sử dụng',item.assignedTo||'—'],['Serial',item.serialNumber||'—'],['IP',item.ipAddress||'—'],
+        ['Ngày mua',item.purchaseDate||'—'],['Giá mua',money(item.purchasePrice)],['Ghi chú',item.description||'—']].map(([label,value])=><div key={label}><small>{label}</small><strong>{value}</strong></div>)}</div>}
+      {tab==='history'&&<><h4>Bàn giao / thu hồi</h4>{history.assignments.length?history.assignments.map(x=><div className="am-event" key={x.id}><ArrowRightLeft size={17}/><div><b>{x.assignedTo}</b><p>Bàn giao: {x.date} · {x.returnedAt?`Thu hồi: ${x.returnedDate||dateLabel(x.returnedAt)}`:'Đang sử dụng'}</p><small>{x.note||''}</small></div></div>):<p className="am-muted">Chưa có lịch sử bàn giao.</p>}
+        <h4>Nhật ký thay đổi</h4>{history.history.map(x=><div className="am-event" key={x.id}><History size={16}/><div><b>{x.summary||x.action}</b><p>{x.byName} · {dateLabel(x.at)}</p></div></div>)}</>}
+      {tab==='maintenance'&&<><div className="am-split"><div><h4>Sửa chữa, thay thế linh kiện và mực in</h4><p className="am-muted">Lưu lịch sử sửa chữa, chi phí, người thực hiện và số vật tư đã dùng.</p></div><button className="am-btn am-primary" onClick={()=>setAddMaintenance(true)}><Plus size={15}/> Ghi sửa chữa</button></div>
+        {!history.maintenance?.length&&<p className="am-muted">Thiết bị chưa có nhật ký sửa chữa.</p>}
+        {(history.maintenance||[]).map(x=><div className="am-maintenance-card" key={x.id}><strong>{x.summary} · {x.date}</strong><p>{x.notes||'Không có ghi chú chi tiết'}{x.replacedParts?' · Linh kiện: '+x.replacedParts:''}</p><small>{x.performedBy||x.byName} · Chi phí: {money(x.cost)}{x.stockName?` · Xuất kho: ${x.stockName} × ${x.stockQuantity}`:''}{x.ticketCode?' · Ticket: '+x.ticketCode:''}</small></div>)}
+        </>}
+      {tab==='software'&&<><form onSubmit={addSoftware} className="am-inline-form"><input required placeholder="Tên phần mềm" value={name} onChange={e=>setName(e.target.value)}/><input placeholder="Phiên bản" value={version} onChange={e=>setVersion(e.target.value)}/><button disabled={busy} className="am-btn am-primary">Thêm</button></form>
+        <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Phần mềm</th><th>Phiên bản</th><th>Thao tác</th></tr></thead><tbody>{software.map(x=><tr key={x.id}><td>{x.softwareName}</td><td>{x.version||'—'}</td><td><button className="am-link danger" onClick={()=>removeSoftware(x)}>Xóa</button></td></tr>)}</tbody></table></div></>}
+      {tab==='images'&&<><div className="am-split"><p className="am-muted">Tối đa 6 ảnh, mỗi ảnh tối đa 5 MB. Cần cấu hình Firebase Storage.</p><label className="am-btn am-primary"><ImagePlus size={15}/> Thêm ảnh<input type="file" hidden accept="image/png,image/jpeg,image/webp" disabled={busy||images.length>=6} onChange={upload}/></label></div>
+        <div className="am-photo-grid">{images.map(img=><div key={img.id}><AssetPhoto assetId={item.id} image={img}/><button className="am-link danger" onClick={()=>removeImage(img)}>Xóa</button></div>)}</div></>}
+      {tab==='qr'&&<AssetQrLabel item={item} url={url}/>}
+
+      {message&&<p className="am-error">{message}</p>}
+    </div>
+    {addMaintenance&&<MaintenanceEditor item={item} onClose={()=>setAddMaintenance(false)} onSaved={async()=>{setAddMaintenance(false);await reload();onRefresh?.();}}/>}
+  </Modal>;
+}
+function ImportPanel({onSaved}){
+ const [file,setFile]=useState(null),[loading,setLoading]=useState(false),[result,setResult]=useState(null),[error,setError]=useState('');
+ const upload=async()=>{if(!file)return;setLoading(true);setError('');setResult(null);try{
+  if(!/\.xlsx$/i.test(file.name))throw new Error('Chọn đúng file Excel .xlsx theo mẫu DanhSachTaiSan.');
+  const buf=await file.arrayBuffer();
+  const r=await rawRequest('/assets/import.xlsx',{method:'POST',headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:buf});
+  setResult(r);onSaved();
+ }catch(err){setError(err.message)}finally{setLoading(false)}};
+ const template=async()=>{try{download(await rawRequest('/assets/template.xlsx',{blob:true}),'Mau_Import_HEXA.xlsx')}catch(err){setError(err.message)}};
+ return <div className="am-card am-padded"><div className="am-heading"><h3>Import tài sản từ Excel</h3><p>Nhập trực tiếp file DanhSachTaiSan.xlsx, không phải chuyển sang CSV.</p></div>
+  <div className="am-import-guide"><strong>Sheet: Assets · 8 cột giữ đúng thứ tự:</strong><code>Mã tài sản | Loại tài sản | Tên tài sản | Công ty | Người sử dụng | Giá tiền | Ghi chú | Địa chỉ IP</code>
+   <p>Hệ thống tự tạo loại tài sản và công ty chưa có. Nếu mã tài sản đã tồn tại sẽ bỏ qua, không ghi đè. Người sử dụng cũ được ghi nhận vào lịch sử cấp phát.</p>
+  </div>
+  <div className="am-inline-form"><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e=>setFile(e.target.files?.[0]||null)}/>
+   <button className="am-btn am-primary" onClick={upload} disabled={!file||loading}><Upload size={16}/>{loading?'Đang nhập...':'Import Excel'}</button><button className="am-btn am-light" onClick={template}><Download size={15}/> Tải Excel mẫu</button>
+  </div>
+  {result&&<p className="am-success">Đã tạo {result.created} tài sản, bỏ qua {result.skipped} mã trùng; tạo {result.categoriesCreated} loại và {result.departmentsCreated} công ty.</p>}
+  {error&&<p className="am-error">{error}</p>}
+ </div>;
+}
+export default function AssetManagement({user,initialTicket=null,onClearInitialTicket=()=>{}}){
+  const [mode,setMode]=useState('assets'),[data,setData]=useState({items:[],total:0,page:1,pageSize:20,totalPages:1});
+  const [catalogs,setCatalogs]=useState({categories:[],departments:[]}),[stats,setStats]=useState({total:0,available:0,using:0,maintenance:0,broken:0,liquidated:0});
+  const [filters,setFilters]=useState({search:'',categoryId:'',ownerDepartmentId:'',status:'',page:1,pageSize:20});
+  const [searchValue,setSearchValue]=useState(''),[editing,setEditing]=useState(undefined),[assigning,setAssigning]=useState(null),[detail,setDetail]=useState(null);
+  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[warehouseRefreshEpoch,setWarehouseRefreshEpoch]=useState(0);
+  const isManager=user.role==='manager';
+  const reloadCatalogs=useCallback(async()=>{setCatalogs(await api('/assets/catalogs'));},[]);
+  const load=useCallback(async()=>{setLoading(true);try{
+    const params=new URLSearchParams();for(const [k,v] of Object.entries(filters))if(v!==''&&v!=null)params.set(k,String(v));
+    if(mode==='trash')params.set('trash','1');
+    const [result,summary]=await Promise.all([api(`/assets?${params}`),api('/assets/summary')]);
+    setData(result);setStats(summary);setError('');
+  }catch(err){setError(err.message);}finally{setLoading(false);}},[filters,mode]);
+  useEffect(()=>{reloadCatalogs().catch(err=>setError(err.message));},[reloadCatalogs]);
+  useEffect(()=>{const timer=setTimeout(()=>setFilters(f=>({...f,search:searchValue,page:1})),300);return()=>clearTimeout(timer);},[searchValue]);
+  useEffect(()=>{if(mode==='assets'||mode==='trash')load();},[mode,load]);
+  useEffect(()=>{if(mode!=='assets'&&mode!=='trash')return;const interval=setInterval(()=>load(),60000);return()=>clearInterval(interval);},[load,mode]);
+  const refresh=async()=>{await Promise.all([load(),reloadCatalogs()]);setNotice('Dữ liệu đã được cập nhật.');};
+  const saved=async()=>{setEditing(undefined);setAssigning(null);setDetail(null);setWarehouseRefreshEpoch(n=>n+1);await refresh();};
+  const remove=async item=>{if(!window.confirm(`Chuyển ${item.assetCode} vào thùng rác?`))return;try{await api(`/assets/${item.id}`,{method:'DELETE'});await refresh();}catch(err){setError(err.message);}};
+  const restore=async item=>{try{await api(`/assets/${item.id}/restore`,{method:'POST'});await refresh();}catch(err){setError(err.message);}};
+  const xlsx=async()=>{try{download(await rawRequest('/assets/export.xlsx',{blob:true}),`DanhSachTaiSan_HEXA_${new Date().toISOString().slice(0,10)}.xlsx`);}catch(err){setError(err.message);}};
+  useEffect(()=>{if(initialTicket){setMode('assets');setEditing({...initialAsset,assetName:initialTicket.itemName||initialTicket.subject,description:`Tham chiếu yêu cầu ${initialTicket.code||initialTicket.id}`});onClearInitialTicket();}},[initialTicket,onClearInitialTicket]);
+  const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['printers','Quản lý máy in',Wrench],['stock','Kho linh kiện',HardDrive],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload]]:[])];
+  return <div className="am-root">
+    <div className="am-split am-section-head"><div><p className="am-eyebrow">HEXA · INVENTORY</p><h2>Quản lý tài sản IT</h2><p>Một tài khoản đăng nhập · Dữ liệu tài sản và ticket cùng Firebase</p></div><div className="am-head-actions">{(mode==='assets'||mode==='trash')&&<button onClick={refresh} className="am-btn am-light"><RefreshCw size={16}/> Làm mới</button>}{mode==='assets'&&<button onClick={()=>setEditing(null)} className="am-btn am-primary"><Plus size={16}/> Thêm tài sản</button>}</div></div>
+    <div className="am-stats">{[[Boxes,'Tổng tài sản',stats.total], [CheckCircle2,'Có sẵn',stats.available],[Laptop,'Đang sử dụng',stats.using],[Wrench,'Bảo trì',stats.maintenance],[AlertTriangle,'Đã hỏng',stats.broken]].map(([Icon,label,value])=><div key={label} className="am-stat"><div className="am-stat-icon"><Icon size={18}/></div><span>{label}</span><strong>{value}</strong></div>)}</div>
+    <div className="am-pill-tabs am-main-tabs">{modes.map(([id,label,Icon])=><button key={id} className={mode===id?'active':''} onClick={()=>{setError('');setNotice('');setMode(id);setFilters(f=>({...f,page:1}));}}><Icon size={15}/>{label}</button>)}</div>
+    {error&&<div className="am-error am-banner">{error}<button onClick={()=>setError('')} aria-label="Đóng lỗi"><X size={15}/></button></div>}
+    {notice&&<div className="am-success am-banner">{notice}<button onClick={()=>setNotice('')} aria-label="Đóng thông báo"><X size={15}/></button></div>}
+    {(mode==='assets'||mode==='trash')&&<div className="am-card">
+      <div className="am-filter-bar"><div className="am-search"><Search size={17}/><input placeholder="Tìm mã, tên, IP, serial, người dùng..." value={searchValue} onChange={e=>setSearchValue(e.target.value)}/></div>
+        <select value={filters.ownerDepartmentId} onChange={e=>setFilters(f=>({...f,page:1,ownerDepartmentId:e.target.value}))}><option value="">Tất cả công ty</option>{catalogs.departments.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+        <select value={filters.categoryId} onChange={e=>setFilters(f=>({...f,page:1,categoryId:e.target.value}))}><option value="">Tất cả loại</option>{catalogs.categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+        <select value={filters.status} onChange={e=>setFilters(f=>({...f,page:1,status:e.target.value}))}><option value="">Mọi trạng thái</option>{Object.entries(STATUS).map(([code,label])=><option key={code} value={code}>{label}</option>)}</select>
+        <button className="am-btn am-light" onClick={xlsx}><Download size={15}/> Xuất Excel</button>
+      </div>
+      <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã tài sản</th><th>Loại / Tên tài sản</th><th>Công ty sở hữu</th><th>Người sử dụng</th><th>Serial / IP</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+        <tbody>{data.items.map(item=><tr key={item.id}><td><button className="am-link strong" onClick={()=>setDetail(item)}>{item.assetCode}</button></td><td><b>{item.assetName}</b><small>{item.categoryName||'Chưa phân loại'}</small></td><td>{item.ownerDepartmentName||'—'}</td><td>{item.assignedTo||'—'}</td><td>{item.serialNumber||'—'}<small>{item.ipAddress||''}</small></td><td><span className={`am-status ${item.status}`}>{STATUS[item.status]||item.status}</span></td><td><div className="am-row-actions">
+          {mode==='assets'?<><button title="Chi tiết / Lịch sử" onClick={()=>setDetail(item)}><History size={15}/></button><button title="Mã QR" onClick={()=>setDetail({...item,initialTab:'qr'})}><QrCode size={15}/></button><button title="Sửa" onClick={()=>setEditing(item)}><Pencil size={15}/></button><button title={item.status==='using'?'Thu hồi':'Bàn giao'} onClick={()=>setAssigning(item)}><ArrowRightLeft size={15}/></button><button title="Xóa mềm" onClick={()=>remove(item)}><Trash2 size={15}/></button></>:<button className="am-btn am-light" onClick={()=>restore(item)}><RotateCcw size={15}/> Khôi phục</button>}
+          </div></td></tr>)}
+          {!loading&&!data.items.length&&<tr><td colSpan={7} className="am-empty"><PackageSearch size={28}/> Chưa có tài sản phù hợp với bộ lọc.</td></tr>}
+          {loading&&!data.items.length&&<tr><td colSpan={7} className="am-empty">Đang tải dữ liệu...</td></tr>}
+        </tbody></table></div>
+      <footer className="am-pagination"><span>{data.total} tài sản · Trang {data.page}/{data.totalPages}</span><div><button disabled={filters.page<=1} onClick={()=>setFilters(f=>({...f,page:f.page-1}))}><ChevronLeft size={17}/></button><button disabled={filters.page>=data.totalPages} onClick={()=>setFilters(f=>({...f,page:f.page+1}))}><ChevronRight size={17}/></button></div></footer>
+    </div>}
+    {(mode==='warehouse'||mode==='stock')&&<WarehouseManagement kind={mode} refreshEpoch={warehouseRefreshEpoch} onAssignAsset={setAssigning} onShowAsset={setDetail}/>}
+    {mode==='printers'&&<PrinterManagement refreshEpoch={warehouseRefreshEpoch}/> }
+    {mode==='catalogs'&&isManager&&<CatalogManager catalogs={catalogs} onSaved={reloadCatalogs}/>} 
+    {mode==='import'&&isManager&&<ImportPanel onSaved={refresh}/>}
+    {editing!==undefined&&<AssetForm item={editing} catalogs={catalogs} onClose={()=>setEditing(undefined)} onSaved={saved}/>}
+    {assigning&&<AssignmentForm item={assigning} onClose={()=>setAssigning(null)} onSaved={saved}/>}
+    {detail&&<AssetDetail item={detail} onClose={()=>setDetail(null)} onRefresh={refresh}/>}
+  </div>;
+}
+
+export function PublicAssetPage({publicId}){
+  const [item,setItem]=useState(null),[error,setError]=useState('');
+  useEffect(()=>{fetch(`${BASE}/api/public/assets/${encodeURIComponent(publicId)}`).then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error||'Không tìm thấy tài sản.');return data;}).then(setItem).catch(e=>setError(e.message));},[publicId]);
+  return <main className="am-public"><div className="am-public-card"><div className="am-eyebrow">HEXA GROUP · QUẢN LÝ TÀI SẢN</div><h1>Thông tin tài sản</h1>
+    {error?<p className="am-error">{error}</p>:item?<div className="am-detail-grid">{[['Mã tài sản',item.assetCode],['Tên tài sản',item.assetName],['Loại',item.categoryName||'—'],['Công ty sở hữu',item.ownerDepartmentName||'—'],['Trạng thái',STATUS[item.status]||'—']].map(([k,v])=><div key={k}><small>{k}</small><strong>{v}</strong></div>)}</div>:<p>Đang tải...</p>}
+    <a className="am-btn am-primary" href="/">Trở về cổng hỗ trợ</a>
+    <p className="am-muted">Trang công khai chỉ hiển thị thông tin định danh, không tiết lộ IP, serial, người sử dụng hoặc giá mua.</p>
+  </div></main>;
+}

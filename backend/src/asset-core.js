@@ -48,11 +48,12 @@ export function selectAssets(rows, query = {}) {
     return !q || [a.assetCode,a.assetName,a.serialNumber,a.ipAddress,a.assignedTo,a.description,a.categoryName,a.ownerDepartmentName]
       .some(v => String(v || '').toLocaleLowerCase('vi').includes(q));
   });
-  const allowedSort = new Set(['assetCode','assetName','createdAt','updatedAt','status','ownerDepartmentName']);
+  const allowedSort = new Set(['assetCode','assetName','categoryName','createdAt','updatedAt','status','ownerDepartmentName','assignedTo','serialOrIp','ipAddress']);
   const sort = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
   const desc = (query.sortDirection || 'desc') === 'desc';
   result.sort((a,b)=>{
-    const av=a[sort]??'', bv=b[sort]??'';
+    const value = row => sort === 'serialOrIp' ? (row.serialNumber || row.ipAddress || '') : row[sort] ?? '';
+    const av=value(a), bv=value(b);
     const n = typeof av === 'number' && typeof bv === 'number' ? av-bv : String(av).localeCompare(String(bv), 'vi', {numeric:true});
     return desc ? -n : n;
   });

@@ -1,6 +1,8 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {api} from './api';
 import {Boxes,Printer,Keyboard,Mouse,Laptop,Package,Plus,Search,ArrowRightLeft,History,RefreshCw,X,Save,CheckCircle2,AlertTriangle} from 'lucide-react';
+import SortableHeader from './SortableHeader.jsx';
+import {sortVisibleRows,toggleColumnSort} from './table-sort.js';
 
 const CATEGORIES={ink:'Mực in',mouse:'Chuột',keyboard:'Bàn phím',laptop:'Laptop',pc:'PC',spare:'Linh kiện',other:'Thiết bị khác'};
 const EMPTY={sku:'',name:'',category:'ink',quantity:0,unit:'cái',minQuantity:0,unitPrice:0,location:'',owner:'',note:''};
@@ -56,11 +58,12 @@ function StockHistory({item,onClose}){
 export default function WarehouseManagement({kind='warehouse',onAssignAsset,onShowAsset,refreshEpoch=0,embedded=false,openCreateSignal=0}){
  const [stock,setStock]=useState({items:[],total:0,alerts:0}),[devices,setDevices]=useState([]),[term,setTerm]=useState(''),[category,setCategory]=useState('all');
  const [devicePage,setDevicePage]=useState(1),[devicePages,setDevicePages]=useState(1),[deviceTotal,setDeviceTotal]=useState(0),[debouncedSearch,setDebouncedSearch]=useState('');
+ const [stockSort,setStockSort]=useState(''),[deviceSort,setDeviceSort]=useState('');
  const [editor,setEditor]=useState(undefined),[transaction,setTransaction]=useState(null),[history,setHistory]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const reload=useCallback(async()=>{setLoading(true);try{
-  const [list,assets]=await Promise.all([api('/warehouse'),kind==='warehouse'?api(`/assets?status=available&pageSize=50&page=${devicePage}&search=${encodeURIComponent(debouncedSearch)}`):Promise.resolve({items:[]})]);
+  const [list,assets]=await Promise.all([api('/warehouse'),kind==='warehouse'?api(`/assets?status=available&pageSize=50&page=${devicePage}&search=${encodeURIComponent(debouncedSearch)}${deviceSort?`&sortBy=${encodeURIComponent(deviceSort)}&sortDirection=asc`:''}`):Promise.resolve({items:[]})]);
   setStock({...list,items:Array.isArray(list?.items)?list.items:[]});setDevices(Array.isArray(assets?.items)?assets.items:[]);setDevicePages(assets.totalPages||1);setDeviceTotal(assets.total||0);setError('');
- }catch(err){setError(err.message)}finally{setLoading(false)}},[kind,devicePage,debouncedSearch]);
+ }catch(err){setError(err.message)}finally{setLoading(false)}},[kind,devicePage,debouncedSearch,deviceSort]);
  useEffect(()=>{const t=setTimeout(()=>{setDebouncedSearch(term);setDevicePage(1);},300);return()=>clearTimeout(t);},[term]);
  useEffect(()=>{reload()},[reload,refreshEpoch]);
  // Nút Thêm mực ở thanh công cụ chung mở biểu mẫu kho mực.
@@ -70,6 +73,14 @@ export default function WarehouseManagement({kind='warehouse',onAssignAsset,onSh
  const summaryInk=safeItems.filter(x=>x.category==='ink');
  const visibleTotal=onlyInk?summaryInk.length:stock.total;
  const visibleAlerts=onlyInk?summaryInk.filter(x=>x.quantity<=x.minQuantity).length:stock.alerts;
+ const sortedStock=useMemo(()=>sortVisibleRows(stocked,stockSort,row=>{
+  if(stockSort==='quantity'||stockSort==='minQuantity')return Number(row[stockSort]??0);
+  if(stockSort==='location')return row.location||row.owner||'';
+  if(stockSort==='category')return CATEGORIES[row.category]||row.category;
+  return row[stockSort];
+ }),[stocked,stockSort]);
+ const toggleStockSort=key=>setStockSort(current=>toggleColumnSort(current,key));
+ const toggleDeviceSort=key=>{setDeviceSort(current=>toggleColumnSort(current,key));setDevicePage(1)};
  const listed=devices;
  const saved=()=>{setEditor(undefined);setTransaction(null);reload()};
  return <div className="am-warehouse">
@@ -80,13 +91,26 @@ export default function WarehouseManagement({kind='warehouse',onAssignAsset,onSh
  </div>
  {error&&<p className="am-error">{error}</p>}
  {kind==='warehouse'&&<div className="am-card" style={{marginBottom:17}}><div className="am-padded"><h3>Thiết bị có mã tài sản còn trong kho</h3><p className="am-muted">Laptop, PC, màn hình, máy in... trạng thái Có sẵn. Cấp phát tại đây sẽ tạo lịch sử bàn giao tài sản.</p></div>
- <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã</th><th>Tài sản</th><th>Loại</th><th>Công ty</th><th>Thao tác</th></tr></thead><tbody>
+ <div className="am-table-wrap"><table className="am-table"><thead><tr>
+ <SortableHeader label="Mã" sortKey="assetCode" activeKey={deviceSort} onToggle={toggleDeviceSort}/>
+ <SortableHeader label="Tài sản" sortKey="assetName" activeKey={deviceSort} onToggle={toggleDeviceSort}/>
+ <SortableHeader label="Loại" sortKey="categoryName" activeKey={deviceSort} onToggle={toggleDeviceSort}/>
+ <SortableHeader label="Công ty" sortKey="ownerDepartmentName" activeKey={deviceSort} onToggle={toggleDeviceSort}/>
+ <th scope="col">Thao tác</th>
+ </tr></thead><tbody>
  {listed.map(item=><tr key={item.id}><td><button className="am-link" onClick={()=>onShowAsset(item)}>{item.assetCode}</button></td><td><b>{item.assetName}</b></td><td>{item.categoryName||'—'}</td><td>{item.ownerDepartmentName||'—'}</td><td><button className="am-btn am-primary" onClick={()=>onAssignAsset(item)}><ArrowRightLeft size={14}/> Cấp phát</button></td></tr>)}
  {!listed.length&&<tr><td colSpan={5} className="am-empty">Chưa có tài sản sẵn sàng cấp phát.</td></tr>}
  </tbody></table></div><div className="am-pagination"><span>{deviceTotal} thiết bị · Trang {devicePage}/{devicePages}</span><div><button disabled={devicePage<=1} onClick={()=>setDevicePage(p=>p-1)}>‹</button><button disabled={devicePage>=devicePages} onClick={()=>setDevicePage(p=>p+1)}>›</button></div></div></div>}
  <div className="am-card"><div className="am-padded"><h3>{onlyInk?'Danh sách mực in':'Vật tư quản lý theo số lượng'}</h3><p className="am-muted">{onlyInk?'Tồn kho mực theo mã, kèm lịch sử nhập, xuất và sử dụng cho máy in.':'Chuột, bàn phím, linh kiện, mực in... được ghi nhận tồn kho và lịch sử xuất cấp phát.'}</p></div>
- <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã kho</th><th>Tên hàng</th><th>Loại</th><th>Tồn kho</th><th>Vị trí / Công ty</th><th>Thao tác</th></tr></thead><tbody>
- {stocked.map(item=><tr key={item.id}><td><b>{item.sku}</b></td><td>{item.name}</td><td>{CATEGORIES[item.category]||item.category}</td><td><span className={item.quantity<=item.minQuantity?'am-stock-low':'am-stock-good'}>{item.quantity} {item.unit}</span>{item.quantity<=item.minQuantity&&<small>Cần nhập thêm</small>}</td><td>{item.location||'—'}<small>{item.owner||''}</small></td><td><div className="am-warehouse-actions"><button className="am-btn am-primary" onClick={()=>setTransaction(item)}><ArrowRightLeft size={14}/>Nhập/Xuất</button><button className="am-icon-btn" title="Lịch sử xuất kho" onClick={()=>setHistory(item)}><History size={16}/></button><button className="am-icon-btn" title="Sửa mặt hàng" onClick={()=>setEditor(item)}><Save size={15}/></button></div></td></tr>)}
+ <div className="am-table-wrap"><table className="am-table"><thead><tr>
+ <SortableHeader label="Mã kho" sortKey="sku" activeKey={stockSort} onToggle={toggleStockSort}/>
+ <SortableHeader label="Tên hàng" sortKey="name" activeKey={stockSort} onToggle={toggleStockSort}/>
+ <SortableHeader label="Loại" sortKey="category" activeKey={stockSort} onToggle={toggleStockSort}/>
+ <SortableHeader label="Tồn kho" sortKey="quantity" activeKey={stockSort} onToggle={toggleStockSort}/>
+ <SortableHeader label="Vị trí / Công ty" sortKey="location" activeKey={stockSort} onToggle={toggleStockSort}/>
+ <th scope="col">Thao tác</th>
+ </tr></thead><tbody>
+ {sortedStock.map(item=><tr key={item.id}><td><b>{item.sku}</b></td><td>{item.name}</td><td>{CATEGORIES[item.category]||item.category}</td><td><span className={item.quantity<=item.minQuantity?'am-stock-low':'am-stock-good'}>{item.quantity} {item.unit}</span>{item.quantity<=item.minQuantity&&<small>Cần nhập thêm</small>}</td><td>{item.location||'—'}<small>{item.owner||''}</small></td><td><div className="am-warehouse-actions"><button className="am-btn am-primary" onClick={()=>setTransaction(item)}><ArrowRightLeft size={14}/>Nhập/Xuất</button><button className="am-icon-btn" title="Lịch sử xuất kho" onClick={()=>setHistory(item)}><History size={16}/></button><button className="am-icon-btn" title="Sửa mặt hàng" onClick={()=>setEditor(item)}><Save size={15}/></button></div></td></tr>)}
  {!stocked.length&&<tr><td colSpan={6} className="am-empty">{loading?'Đang tải dữ liệu...':'Chưa có hàng tồn trong nhóm này.'}</td></tr>}
  </tbody></table></div></div>
  {editor!==undefined&&<StockEditor item={editor} kind={kind} onClose={()=>setEditor(undefined)} onSaved={saved}/>}

@@ -32,3 +32,10 @@
 .am-qr-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}
 .am-qr-actions .am-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none}
 @media(max-width:650px){.am-modal.am-detail-fixed{height:calc(100dvh - 24px);max-height:calc(100dvh - 24px);width:calc(100vw - 20px)}.am-qr-layout{grid-template-columns:1fr}.am-qr-label{max-width:310px;margin:auto;width:100%}.am-detail-fixed>.am-modal-header{min-height:75px}}
+
+/* HEXA: bảng sắp xếp bằng cách nhấp tiêu đề (nhấp lại = bỏ sắp xếp). */
+.am-table th .am-sort-toggle{display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:0;background:transparent;border:0;cursor:pointer;white-space:nowrap;color:inherit;font:inherit;letter-spacing:inherit;text-align:left;min-height:24px}
+.am-table th .am-sort-toggle svg{flex-shrink:0;color:#a4b2c7;transition:color .15s ease}
+.am-table th .am-sort-toggle.is-active{color:#2267d6}
+.am-table th .am-sort-toggle.is-active svg,.am-table th .am-sort-toggle:hover svg{color:#2267d6}
+.am-table th .am-sort-toggle:focus-visible{outline:2px solid #3475df;outline-offset:4px;border-radius:2px}

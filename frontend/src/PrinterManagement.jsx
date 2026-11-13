@@ -6,6 +6,8 @@ import {
 import {api} from './api';
 import WarehouseManagement from './WarehouseManagement.jsx';
 import './printer-management.css';
+import SortableHeader from './SortableHeader.jsx';
+import {sortVisibleRows,toggleColumnSort} from './table-sort.js';
 
 const dateToday=()=>new Date().toLocaleDateString('en-CA');
 const makeOperationId=()=>`p_${crypto.randomUUID().replaceAll('-','')}`;
@@ -159,6 +161,7 @@ function PrinterDetail({printer,onClose,onSaved}){
 
 export default function PrinterManagement({refreshEpoch=0}){
   const [tab,setTab]=useState('printers'),[printers,setPrinters]=useState([]),[search,setSearch]=useState('');
+  const [printerSort,setPrinterSort]=useState('');
   const [selected,setSelected]=useState(null),[editing,setEditing]=useState(null),[showCreate,setShowCreate]=useState(false);
   const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[refreshId,setRefreshId]=useState(0);
   const [inkCreateSignal,setInkCreateSignal]=useState(0);
@@ -166,7 +169,11 @@ export default function PrinterManagement({refreshEpoch=0}){
     const p=await api('/assets/printers');setPrinters(Array.isArray(p.items)?p.items:[]);setError('');
   }catch(e){setError(e.message)}finally{setLoading(false)}},[]);
   useEffect(()=>{refresh();},[refresh,refreshEpoch,refreshId]);
-  const listed=useMemo(()=>printers.filter(p=>`${p.assetCode} ${p.assetName} ${p.serialNumber||''} ${p.ipAddress||''} ${p.tonerType||''} ${p.location||''} ${p.assignedTo||''}`.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi'))),[printers,search]);
+  const listed=useMemo(()=>{
+    const filtered=printers.filter(p=>`${p.assetCode} ${p.assetName} ${p.serialNumber||''} ${p.ipAddress||''} ${p.tonerType||''} ${p.location||''} ${p.assignedTo||''}`.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi')));
+    return sortVisibleRows(filtered,printerSort,p=>printerSort==='ipAddress'?(p.ipAddress||p.location):p[printerSort]);
+  },[printers,search,printerSort]);
+  const togglePrinterSort=key=>setPrinterSort(current=>toggleColumnSort(current,key));
   const savedPrinter=async (result,wasEdit)=>{
     setEditing(null);setShowCreate(false);
     setNotice(wasEdit?'Đã cập nhật thông tin máy in.':`Đã thêm máy in ${result.assetCode} vào danh sách.`);
@@ -197,7 +204,14 @@ export default function PrinterManagement({refreshEpoch=0}){
       <section id="pm-panel-printers" className="pm-tab-panel" role="tabpanel" aria-labelledby="pm-tab-printers" hidden={tab!=='printers'}>
         <div className="am-card">
           <div className="pm-search"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm máy in theo mã, tên, IP, loại mực, vị trí..."/></div>
-          <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã máy in</th><th>Tên máy in</th><th>IP / Vị trí</th><th>Loại mực đổ</th><th>Công ty</th><th>Thao tác</th></tr></thead><tbody>
+          <div className="am-table-wrap"><table className="am-table"><thead><tr>
+            <SortableHeader label="Mã máy in" sortKey="assetCode" activeKey={printerSort} onToggle={togglePrinterSort}/>
+            <SortableHeader label="Tên máy in" sortKey="assetName" activeKey={printerSort} onToggle={togglePrinterSort}/>
+            <SortableHeader label="IP / Vị trí" sortKey="ipAddress" activeKey={printerSort} onToggle={togglePrinterSort}/>
+            <SortableHeader label="Loại mực đổ" sortKey="tonerType" activeKey={printerSort} onToggle={togglePrinterSort}/>
+            <SortableHeader label="Công ty" sortKey="ownerDepartmentName" activeKey={printerSort} onToggle={togglePrinterSort}/>
+            <th scope="col">Thao tác</th>
+          </tr></thead><tbody>
             {listed.map(p=><tr key={p.id}><td><b>{p.assetCode}</b></td><td>{p.assetName}<small>{p.serialNumber||''}</small></td>
               <td>{p.ipAddress||'USB / chưa có IP'}<small>{p.location||''}</small></td><td>{p.tonerType||'Chưa khai báo'}</td>
               <td>{p.ownerDepartmentName||'—'}</td><td><div className="pm-row-actions">
