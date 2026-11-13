@@ -1,0 +1,44 @@
+/* HEXA_HEADER_NETWORK_CLOCK_20261113_V1 — compact header additions */
+.admin-topbar .bar-left { min-width: 0; }
+.admin-topbar .bar-right { min-width: 0; flex-shrink: 0; gap: 10px; }
+.admin-topbar .breadcrumbs { min-width: 0; white-space: nowrap; }
+.admin-topbar .breadcrumbs strong { overflow: hidden; text-overflow: ellipsis; }
+.hexa-header-telemetry { display: inline-flex; align-items: center; gap: 11px; min-width: 0; white-space: nowrap; }
+.hexa-network-state, .hexa-header-clock, .hexa-header-date.date-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; height: 32px; white-space: nowrap;
+  font-size: 11px; font-weight: 700;
+}
+.hexa-network-state { color: #13795b; }
+.hexa-network-state.is-offline { color: #cf4050; }
+.hexa-network-state svg { flex-shrink: 0; }
+.hexa-header-date.date-chip { color: #4c776f !important; }
+.hexa-header-date svg, .hexa-header-clock svg { flex-shrink: 0; }
+.hexa-header-clock { color: #1d5b52; font-variant-numeric: tabular-nums; letter-spacing: .15px; }
+.hexa-header-clock time { min-width: 58px; text-align: left; }
+.hexa-date-short { display: none; }
+html[data-hexa-theme="dark"] .hexa-network-state.is-online { color: #8ce4bd !important; }
+html[data-hexa-theme="dark"] .hexa-network-state.is-offline { color: #ffa6ad !important; }
+html[data-hexa-theme="dark"] .hexa-header-date.date-chip,
+html[data-hexa-theme="dark"] .hexa-header-clock { color: #d0e8df !important; }
+@media (max-width: 1380px) {
+  .admin-topbar .bar-right { gap: 8px; }
+  .hexa-header-telemetry { gap: 9px; }
+  .hexa-network-label { display: none; }
+}
+@media (max-width: 1120px) {
+  .hexa-date-long { display: none; }
+  .hexa-date-short { display: inline; }
+}
+@media (max-width: 800px) {
+  .hexa-header-date.date-chip { display: inline-flex; }
+}
+@media (max-width: 630px) {
+  .hexa-header-date.date-chip { display: none; }
+  .admin-topbar .bar-right { gap: 6px; }
+  .hexa-header-telemetry { gap: 7px; }
+  .hexa-header-clock { font-size: 10px; }
+}
+@media (max-width: 420px) {
+  .hexa-header-clock svg { display: none; }
+}
