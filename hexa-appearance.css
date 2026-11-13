@@ -1,0 +1,339 @@
+/* HEXA APPEARANCE V1 — layer applied after the existing application styles.
+   Light: white + soft forest green. Dark: charcoal green, opaque dialogs.
+   No changes to backend, Realtime Database or authentication. */
+:root {
+  --hexa-accent: #0b6b5e;
+  --hexa-accent-hover: #084f46;
+  --hexa-focus-ring: rgba(11,107,94,.2);
+}
+.hexa-theme-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #d9ebe6 !important;
+  border-radius: 10px;
+  background: #fff !important;
+  color: #0b6b5e !important;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease;
+}
+.hexa-theme-toggle:hover:not(:disabled),
+.hexa-theme-toggle:focus-visible {
+  background: #0b6b5e !important;
+  color: #fff !important;
+  border-color: #0b6b5e !important;
+}
+.hexa-theme-toggle:focus-visible { outline: 3px solid #b3dcd1; outline-offset: 2px; }
+
+/* Fix the transparent printer modal introduced by the previous palette patch.
+   A real, opaque surface must cover the inventory page beneath the dialog. */
+.pm-overlay {
+  background: rgba(9, 24, 22, .56) !important;
+  z-index: 2147483000 !important;
+}
+.pm-overlay .pm-modal {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+  background: #fff !important;
+  color: #24453f !important;
+  opacity: 1 !important;
+  border: 1px solid #dcece8;
+  box-shadow: 0 26px 76px rgba(5, 29, 25, .28);
+}
+.pm-overlay .pm-head,
+.pm-overlay .pm-content,
+.pm-overlay .pm-history-view,
+.pm-overlay .pm-form { background: #fff !important; }
+.pm-overlay .pm-head { border-color: #e5f0ec !important; }
+.pm-overlay .pm-history-row {
+  background: #fff !important;
+  border-color: #dcece8 !important;
+  color: #24453f !important;
+}
+.pm-overlay .pm-history-row strong,
+.pm-overlay .pm-history-details dd,
+.pm-overlay .pm-history-meta b { color: #24453f !important; }
+.pm-overlay .pm-history-details {
+  background: #f5faf8 !important;
+  border-color: #dcece8 !important;
+}
+.pm-overlay .pm-content { position: relative; scrollbar-gutter: stable; }
+.pm-overlay .pm-repair-total {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: #eef8f5 !important;
+  border-color: #c8e6dc !important;
+  box-shadow: 0 -8px 20px rgba(9, 58, 48, .10) !important;
+}
+.pm-overlay .pm-repair-total strong,
+.pm-overlay .pm-repair-total output { color: #0b5a4f !important; }
+.pm-overlay .pm-repair-total span,
+.pm-overlay .pm-repair-total small { color: #52776f !important; }
+.pm-overlay .pm-history-expand,
+.pm-overlay .pm-history-filters button:not(.active) {
+  border-color: #cfe6de !important;
+  background: #f6fbf9 !important;
+  color: #176c5e !important;
+}
+.pm-overlay .pm-history-expand:hover,
+.pm-overlay .pm-history-filters button:hover,
+.pm-overlay .pm-history-filters button.active { background: #0b6b5e !important; color: #fff !important; }
+
+/* Dark mode: maintain the HEXA green identity, with legible contrast. */
+html[data-hexa-theme="dark"] {
+  color-scheme: dark;
+  --navy: #152a26;
+  --navydeep: #0e1c1a;
+  --blue: #57c6ae;
+  --indigo: #57c6ae;
+  --text: #e3f1ed;
+  --muted: #a2bcb5;
+  --border: #315149;
+  --bg: #0f1e1b;
+  --hexa-accent: #147e6d;
+  --hexa-accent-hover: #1b937f;
+  --shadow: 0 12px 35px rgba(0, 0, 0, .19);
+  background: #0f1e1b;
+}
+html[data-hexa-theme="dark"] body,
+html[data-hexa-theme="dark"] #root,
+html[data-hexa-theme="dark"] .admin-root,
+html[data-hexa-theme="dark"] .admin-main,
+html[data-hexa-theme="dark"] .admin-content,
+html[data-hexa-theme="dark"] .public-root,
+html[data-hexa-theme="dark"] .request-area,
+html[data-hexa-theme="dark"] .am-root,
+html[data-hexa-theme="dark"] .am-public,
+html[data-hexa-theme="dark"] .requester-auth-root,
+html[data-hexa-theme="dark"] .requester-list { background: #0f1e1b !important; color: #e3f1ed !important; }
+html[data-hexa-theme="dark"] .sidebar,
+html[data-hexa-theme="dark"] .admin-topbar,
+html[data-hexa-theme="dark"] .public-header,
+html[data-hexa-theme="dark"] .public-footer {
+  background: #132823 !important;
+  border-color: #315149 !important;
+  color: #e3f1ed !important;
+}
+html[data-hexa-theme="dark"] .side-brand-name,
+html[data-hexa-theme="dark"] .side-brand-name span,
+html[data-hexa-theme="dark"] .brand-name,
+html[data-hexa-theme="dark"] .brand-name span { color: #71d7c1 !important; }
+html[data-hexa-theme="dark"] .side-label,
+html[data-hexa-theme="dark"] .breadcrumbs,
+html[data-hexa-theme="dark"] .date-chip { color: #a4c0b8 !important; }
+html[data-hexa-theme="dark"] .side-link { background: transparent !important; color: #c8e1da !important; }
+html[data-hexa-theme="dark"] .side-link.active,
+html[data-hexa-theme="dark"] .side-link:hover { background: #147e6d !important; color: #fff !important; }
+html[data-hexa-theme="dark"] .side-profile,
+html[data-hexa-theme="dark"] .side-bottom,
+html[data-hexa-theme="dark"] .login-notice { background: #1b332d !important; border-color: #36584f !important; }
+html[data-hexa-theme="dark"] .profile-meta strong { color: #e4f2ee !important; }
+html[data-hexa-theme="dark"] .profile-meta span { color: #aac5bd !important; }
+html[data-hexa-theme="dark"] .profile-avatar,
+html[data-hexa-theme="dark"] .top-avatar { background: #1e5349 !important; color: #effffb !important; }
+html[data-hexa-theme="dark"] .hexa-theme-toggle,
+html[data-hexa-theme="dark"] .desktop-sidebar-toggle,
+html[data-hexa-theme="dark"] .icon-button {
+  background: #203a33 !important;
+  color: #caece3 !important;
+  border-color: #3e6258 !important;
+}
+html[data-hexa-theme="dark"] .hexa-theme-toggle:hover,
+html[data-hexa-theme="dark"] .desktop-sidebar-toggle:hover,
+html[data-hexa-theme="dark"] .icon-button:hover { background: #147e6d !important; color: #fff !important; }
+html[data-hexa-theme="dark"] .dash-panel,
+html[data-hexa-theme="dark"] .stat-card,
+html[data-hexa-theme="dark"] .card-surface,
+html[data-hexa-theme="dark"] .am-stat,
+html[data-hexa-theme="dark"] .am-card,
+html[data-hexa-theme="dark"] .am-modal,
+html[data-hexa-theme="dark"] .pm-history-row,
+html[data-hexa-theme="dark"] .pm-history-details,
+html[data-hexa-theme="dark"] .pm-search,
+html[data-hexa-theme="dark"] .pm-stock,
+html[data-hexa-theme="dark"] .pm-repair-total,
+html[data-hexa-theme="dark"] .requester-auth-card,
+html[data-hexa-theme="dark"] .login-form-panel,
+html[data-hexa-theme="dark"] .success-card,
+html[data-hexa-theme="dark"] .modal,
+html[data-hexa-theme="dark"] .detail-grid>div,
+html[data-hexa-theme="dark"] .am-detail-grid>div,
+html[data-hexa-theme="dark"] .am-warehouse-summary>div,
+html[data-hexa-theme="dark"] .am-maintenance-card,
+html[data-hexa-theme="dark"] .settings-toggle-row {
+  background: #1b302b !important;
+  border-color: #36564e !important;
+  color: #e3f1ed !important;
+  box-shadow: none !important;
+}
+html[data-hexa-theme="dark"] .am-stat-icon,
+html[data-hexa-theme="dark"] .stat-icon,
+html[data-hexa-theme="dark"] .type-card-icon.support,
+html[data-hexa-theme="dark"] .recent-n-icon,
+html[data-hexa-theme="dark"] .notification-icon {
+  background: #244c41 !important;
+  color: #91e2cd !important;
+}
+html[data-hexa-theme="dark"] :is(h1,h2,h3,h4, .dash-heading h1, .am-heading h2,
+  .am-heading h3, .am-table td b, .am-stat strong, .stat-card>strong,
+  .panel-header h3, .pm-head h3, .pm-history-row strong, .pm-history-details dd,
+  .am-modal-header h2, .am-detail-grid strong, .user-cell strong, .ticket-desc strong,
+  .profile-meta strong, .list-top h3, .pm-repair-total strong) { color: #e3f1ed !important; }
+html[data-hexa-theme="dark"] :is(p, .am-muted, .am-stat span, .stat-label, .stat-sub,
+  .am-table td, .am-table td small, .pm-help, .pm-history-row p, .pm-history-row span,
+  .am-modal-header p, .requester-auth-card>p, .pm-heading p, .pm-head p,
+  .pm-history-meta, .pm-history-details dt, .breadcrumbs) { color: #b0c8c1 !important; }
+html[data-hexa-theme="dark"] .am-table th,
+html[data-hexa-theme="dark"] .responsive-table th,
+html[data-hexa-theme="dark"] .responsive-table table th { background: #213c35 !important; color: #b9d7cf !important; }
+html[data-hexa-theme="dark"] .am-table tbody tr:hover,
+html[data-hexa-theme="dark"] .responsive-table tr:hover,
+html[data-hexa-theme="dark"] .clickable-row:hover { background: #29453e !important; }
+html[data-hexa-theme="dark"] .am-table td,
+html[data-hexa-theme="dark"] .responsive-table td,
+html[data-hexa-theme="dark"] .pm-head,
+html[data-hexa-theme="dark"] .am-modal-header { border-color: #34554c !important; }
+html[data-hexa-theme="dark"] input,
+html[data-hexa-theme="dark"] select,
+html[data-hexa-theme="dark"] textarea,
+html[data-hexa-theme="dark"] .control-wrap,
+html[data-hexa-theme="dark"] .search-input,
+html[data-hexa-theme="dark"] .small-select,
+html[data-hexa-theme="dark"] .am-search,
+html[data-hexa-theme="dark"] .am-filter-bar,
+html[data-hexa-theme="dark"] .am-field>input,
+html[data-hexa-theme="dark"] .pm-form input,
+html[data-hexa-theme="dark"] .pm-form textarea,
+html[data-hexa-theme="dark"] .pm-form select {
+  background: #223c35 !important;
+  color: #f0faf7 !important;
+  border-color: #41645a !important;
+}
+html[data-hexa-theme="dark"] :is(input,textarea)::placeholder { color: #a0bbb1 !important; opacity: 1; }
+html[data-hexa-theme="dark"] .am-pill-tabs,
+html[data-hexa-theme="dark"] .am-main-tabs,
+html[data-hexa-theme="dark"] .am-detail-tabs,
+html[data-hexa-theme="dark"] .pm-tabs,
+html[data-hexa-theme="dark"] .ticket-tabs,
+html[data-hexa-theme="dark"] .pm-history-filters button:not(.active),
+html[data-hexa-theme="dark"] .pm-history-expand {
+  background: #223b34 !important;
+  color: #c5e2d9 !important;
+  border-color: #3a5a50 !important;
+}
+html[data-hexa-theme="dark"] .am-pill-tabs button,
+html[data-hexa-theme="dark"] .pm-tabs button { color: #c4ded7 !important; }
+html[data-hexa-theme="dark"] .am-pill-tabs button.active,
+html[data-hexa-theme="dark"] .am-pill-tabs button:hover,
+html[data-hexa-theme="dark"] .pm-tabs button.active,
+html[data-hexa-theme="dark"] .pm-tabs button:hover,
+html[data-hexa-theme="dark"] .pm-history-filters button.active,
+html[data-hexa-theme="dark"] .pm-history-filters button:hover {
+  background: #147e6d !important;
+  color: #fff !important;
+}
+html[data-hexa-theme="dark"] .am-btn.am-primary,
+html[data-hexa-theme="dark"] .pm-primary,
+html[data-hexa-theme="dark"] .btn.primary { background: #147e6d !important; border-color: #147e6d !important; color: #fff !important; }
+html[data-hexa-theme="dark"] .am-btn.am-primary:hover,
+html[data-hexa-theme="dark"] .pm-primary:hover,
+html[data-hexa-theme="dark"] .btn.primary:hover { background: #1b937f !important; border-color: #1b937f !important; }
+html[data-hexa-theme="dark"] .am-btn.am-light,
+html[data-hexa-theme="dark"] .btn.muted {
+  background: #213d35 !important;
+  border-color: #45685d !important;
+  color: #d5eee6 !important;
+}
+html[data-hexa-theme="dark"] .am-btn.am-light:hover,
+html[data-hexa-theme="dark"] .btn.muted:hover,
+html[data-hexa-theme="dark"] .am-row-actions button:hover { background: #147e6d !important; color: #fff !important; }
+html[data-hexa-theme="dark"] .status-progress,
+html[data-hexa-theme="dark"] .am-status.using { background: #24483f !important; color: #94dec9 !important; }
+html[data-hexa-theme="dark"] .am-status.available { background: #24483f !important; color: #a6e6d6 !important; }
+html[data-hexa-theme="dark"] .status-new { background: #483a26 !important; color: #f5ce83 !important; }
+html[data-hexa-theme="dark"] .status-hold { background: #40304a !important; color: #dcb4f3 !important; }
+html[data-hexa-theme="dark"] .status-closed { background: #2b3d3a !important; color: #b9cfca !important; }
+
+/* Opaque history window: separate neutral cards and sticky repair total. */
+html[data-hexa-theme="dark"] .pm-overlay { background: rgba(2, 12, 10, .72) !important; }
+html[data-hexa-theme="dark"] .pm-overlay .pm-modal {
+  background: #182d28 !important;
+  border-color: #45675e !important;
+  color: #e7f5f0 !important;
+}
+html[data-hexa-theme="dark"] .pm-overlay .pm-head,
+html[data-hexa-theme="dark"] .pm-overlay .pm-content,
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-view,
+html[data-hexa-theme="dark"] .pm-overlay .pm-form { background: #182d28 !important; }
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-row,
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-details { background: #203b33 !important; border-color: #426257 !important; }
+html[data-hexa-theme="dark"] .pm-overlay .pm-repair-total {
+  background: #25473e !important;
+  border-color: #4e8576 !important;
+  box-shadow: 0 -8px 20px rgba(0,0,0,.25) !important;
+}
+html[data-hexa-theme="dark"] .pm-overlay .pm-repair-total output { color: #91e9cf !important; }
+html[data-hexa-theme="dark"] .pm-overlay .pm-repair-total span,
+html[data-hexa-theme="dark"] .pm-overlay .pm-repair-total small { color: #b8d5cc !important; }
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-expand,
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-filters button:not(.active) {
+  background: #223d35 !important;
+  border-color: #4a7266 !important;
+  color: #d5f0e7 !important;
+}
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-expand:hover,
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-filters button:hover,
+html[data-hexa-theme="dark"] .pm-overlay .pm-history-filters button.active { background: #147e6d !important; color: #fff !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hexa-theme-toggle, .am-pill-tabs button, .pm-tabs button { transition: none !important; }
+}
+
+/* HEXA CLEAN ASSET TABS — hide redundant intro titles/descriptions only.
+   Keep tab names, actionable buttons, table headers, modal titles, stock counts,
+   error notices and data entry instructions visible. */
+.am-root > .am-section-head > div:first-child,
+.pm-root > .pm-heading > div:first-child,
+.am-warehouse > .am-heading > div:first-child,
+.am-extra > .am-heading > div:first-child,
+.am-card.am-padded > .am-heading.am-split > div:first-child {
+  display: none !important;
+}
+/* These two panels contain no actions in their intro; remove the empty row. */
+.am-extra > .am-heading:not(.am-split),
+.am-card.am-padded > .am-heading:not(.am-split) {
+  display: none !important;
+}
+.am-root > .am-section-head,
+.pm-root > .pm-heading,
+.am-warehouse > .am-heading,
+.am-extra > .am-heading {
+  justify-content: flex-end !important;
+  min-height: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 10px !important;
+}
+.am-root > .am-section-head:has(> .am-head-actions:empty) {
+  display: none !important;
+}
+.am-root .am-card.am-padded > .am-heading.am-split:has(> .am-pill-tabs) {
+  justify-content: flex-start !important;
+}
+.am-warehouse > .am-card > .am-padded:has(> h3) {
+  display: none !important;
+}
+/* Do not leave empty heights in the printer + inventory toolbars. */
+.pm-root > .pm-heading { min-height: 38px !important; }
+.am-root > .am-section-head .am-head-actions,
+.pm-root > .pm-heading .pm-heading-actions,
+.am-warehouse > .am-heading .am-head-actions {
+  margin-left: auto !important;
+}
+@media(max-width:640px){
+  .pm-root > .pm-heading { min-height: 38px !important; }
+  .pm-root > .pm-heading .pm-heading-actions { width: auto !important; }
+}

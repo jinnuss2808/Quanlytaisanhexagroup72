@@ -9,7 +9,7 @@ import {
   LogOut, Menu, Monitor, Package, Plus, Search, Send, ShieldCheck, Sparkles,
   Ticket, UserRound, UserRoundPlus, UsersRound, X, AlertCircle, CirclePause,
   Settings2, CalendarDays, FileText, MessageSquareText, Zap, Building2, BriefcaseBusiness,
-  Mail, Phone, Hash, ExternalLink, RefreshCw, ClipboardCheck, CheckCheck, BarChart3, AlarmClock, Star, UserCheck, UserX, CalendarOff, SlidersHorizontal, Boxes, PanelLeftClose, PanelLeftOpen
+  Mail, Phone, Hash, ExternalLink, RefreshCw, ClipboardCheck, CheckCheck, BarChart3, AlarmClock, Star, UserCheck, UserX, CalendarOff, SlidersHorizontal, Boxes, PanelLeftClose, PanelLeftOpen, Sun, Moon
 } from 'lucide-react';
 import { auth, realtimeDb } from './firebase';
 import { api } from './api';
@@ -324,6 +324,25 @@ function LoginPage() {
       <div className="login-notice"><ShieldCheck size={17}/> Khu vực bảo mật, chỉ dành cho nhân viên IT được ủy quyền.</div></form><div className="login-bottom">© {new Date().getFullYear()} HEXA · IT Service Desk</div></div>
   </div>;
 }
+/* HEXA_APPEARANCE_TOGGLE_V1 */
+function HexaAppearanceToggle() {
+  const [appearance, setAppearance] = useState(() => {
+    try { return window.localStorage.getItem('hexa.appearance.v1') === 'dark' ? 'dark' : 'light'; }
+    catch { return 'light'; }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-hexa-theme', appearance);
+    try { window.localStorage.setItem('hexa.appearance.v1', appearance); }
+    catch { /* Browser blocks localStorage. The current choice still works. */ }
+  }, [appearance]);
+  const nextTitle = appearance === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối';
+  return <button type="button" className="hexa-theme-toggle" aria-label={nextTitle}
+    title={nextTitle} aria-pressed={appearance === 'dark'}
+    onClick={() => setAppearance(current => current === 'dark' ? 'light' : 'dark')}>
+    {appearance === 'dark' ? <Sun size={19} aria-hidden="true"/> : <Moon size={19} aria-hidden="true"/>}
+  </button>;
+}
+
 function Dashboard({ user, onLogout }) {
   // Asset management is the primary module while Ticket may be disabled.
   const [section, setSection] = useState('assets');
@@ -451,7 +470,7 @@ function Dashboard({ user, onLogout }) {
       <div className="side-bottom"><div className="side-profile"><div className="profile-avatar">{shortName(user.name)}</div><div className="profile-meta"><strong>{user.name}</strong><span>{isManager ? 'Quản lý IT' : 'Nhân viên IT'}</span></div><button title="Đăng xuất" onClick={onLogout}><LogOut size={18}/></button></div></div>
     </aside>
     <div className="admin-main"><header className="admin-topbar"><div className="bar-left"><button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Mở menu"><Menu size={22}/></button><button className="desktop-sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Mở rộng menu bên trái' : 'Thu gọn menu bên trái'} title={sidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(v => !v)}>{sidebarCollapsed ? <PanelLeftOpen size={20}/> : <PanelLeftClose size={20}/>}</button><div className="breadcrumbs">Hệ thống <ChevronRight size={15}/> <strong>{title}</strong></div></div>
-      <div className="bar-right"><span className="date-chip"><CalendarDays size={16}/>{new Date().toLocaleDateString('vi-VN', { day: 'numeric', month: 'long', year: 'numeric' })}</span><button className="icon-button" onClick={() => refresh()} title="Làm mới"><RefreshCw size={18}/></button><button className="icon-button notify-button" onClick={() => selectSection('notifications')} title="Thông báo"><Bell size={19}/>{unread > 0 && <span className="notify-dot"/>}</button><button className="icon-button" onClick={() => setShowPasswordModal(true)} title="Đổi mật khẩu của tôi"><LockKeyhole size={18}/></button><div className="top-avatar">{shortName(user.name)}</div></div></header>
+      <div className="bar-right"><HexaAppearanceToggle/><span className="date-chip"><CalendarDays size={16}/>{new Date().toLocaleDateString('vi-VN', { day: 'numeric', month: 'long', year: 'numeric' })}</span><button className="icon-button" onClick={() => refresh()} title="Làm mới"><RefreshCw size={18}/></button><button className="icon-button notify-button" onClick={() => selectSection('notifications')} title="Thông báo"><Bell size={19}/>{unread > 0 && <span className="notify-dot"/>}</button><button className="icon-button" onClick={() => setShowPasswordModal(true)} title="Đổi mật khẩu của tôi"><LockKeyhole size={18}/></button><div className="top-avatar">{shortName(user.name)}</div></div></header>
       <div className="admin-content">{section !== 'assets' && <div className="dash-heading"><div><span className="eyebrow dark">{isManager ? 'QUẢN TRỊ VIÊN' : 'NHÂN VIÊN HỖ TRỢ'} · HEXA IT</span><h1>{title}</h1><p>{section === 'overview' ? `Xin chào ${user.name}! Đây là tình hình yêu cầu hỗ trợ hiện tại.` : 'Theo dõi, cập nhật và xử lý công việc trên cùng một nền tảng.'}</p></div>
         <div className="heading-actions">{section === 'users' && <button className="btn primary" onClick={() => setShowAddUser(true)}><UserRoundPlus size={17}/> Thêm tài khoản IT</button>}{['tickets','overview'].includes(section) && <button className="btn muted" onClick={() => refresh()}><RefreshCw size={16}/> Làm mới</button>}</div></div>}
         <Alert message={error} onClose={() => setError('')}/>

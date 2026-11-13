@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './styles.css';
+import './hexa-appearance.css';
 
 class HEXAErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
@@ -26,6 +27,11 @@ class HEXAErrorBoundary extends React.Component {
   }
 }
 
+// HEXA_APPEARANCE_BOOTSTRAP_V1: restore mode before React paints the UI.
+try {
+  const savedAppearance = window.localStorage.getItem('hexa.appearance.v1');
+  document.documentElement.setAttribute('data-hexa-theme', savedAppearance === 'dark' ? 'dark' : 'light');
+} catch { document.documentElement.setAttribute('data-hexa-theme', 'light'); }
 createRoot(document.getElementById('root')).render(
   <React.StrictMode><HEXAErrorBoundary><App /></HEXAErrorBoundary></React.StrictMode>
 );
