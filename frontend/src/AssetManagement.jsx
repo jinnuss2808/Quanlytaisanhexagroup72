@@ -1,3 +1,4 @@
+/* HEXA_IT_LIBRARY_V1 */
 import React, { useCallback, useEffect, useMemo, useState, useRef} from 'react';
 import { auth } from './firebase';
 import { api } from './api';
@@ -324,7 +325,6 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['printers','Quản lý máy in',Wrench],['stock','Kho linh kiện',HardDrive],['stocktake','Kiểm kê QR',QrCode],['reports','Báo cáo tài sản',Building2],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload],['backups','Sao lưu',Download]]:[])];
   const hexaVisibleModes = modes.filter(([id]) => id === 'assets' || !hexaHiddenTabs.includes(id));
   return <div className="am-root">
-    <div className="am-split am-section-head"><div><p className="am-eyebrow">HEXA · INVENTORY</p><h2>Quản lý tài sản IT</h2><p>Một tài khoản đăng nhập · Dữ liệu tài sản và ticket cùng Firebase</p></div><div className="am-head-actions">{(mode==='assets'||mode==='trash')&&<button onClick={refresh} className="am-btn am-light"><RefreshCw size={16}/> Làm mới</button>}{mode==='assets'&&<button onClick={()=>setEditing(null)} className="am-btn am-primary"><Plus size={16}/> Thêm tài sản</button>}</div></div>
     <div className="am-stats">{[[Boxes,'Tổng tài sản',stats.total], [CheckCircle2,'Có sẵn',stats.available],[Laptop,'Đang sử dụng',stats.using],[Wrench,'Bảo trì',stats.maintenance],[AlertTriangle,'Đã hỏng',stats.broken]].map(([Icon,label,value])=><div key={label} className="am-stat"><div className="am-stat-icon"><Icon size={18}/></div><span>{label}</span><strong>{value}</strong></div>)}</div>
 
     <div className="am-tabs-toolbar">
@@ -343,14 +343,18 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
     {error&&<div className="am-error am-banner">{error}<button onClick={()=>setError('')} aria-label="Đóng lỗi"><X size={15}/></button></div>}
     {notice&&<div className="am-success am-banner">{notice}<button onClick={()=>setNotice('')} aria-label="Đóng thông báo"><X size={15}/></button></div>}
     <div className="am-tab-stage" key={mode} aria-label="Nội dung Quản lý tài sản">
-    {(mode==='assets'||mode==='trash')&&<div className="am-card">
-      <div className="am-filter-bar"><div className="am-search"><Search size={17}/><input placeholder="Tìm mã, tên, IP, serial, người dùng..." value={searchValue} onChange={e=>setSearchValue(e.target.value)}/></div>
+    {(mode==='assets'||mode==='trash')&&<div className="am-card am-asset-list-card">
+      <div className="am-filter-bar am-assets-toolbar"><div className="am-search"><Search size={17}/><input placeholder="Tìm mã, tên, IP, serial, người dùng..." value={searchValue} onChange={e=>setSearchValue(e.target.value)}/></div>
         <select value={filters.ownerDepartmentId} onChange={e=>setFilters(f=>({...f,page:1,ownerDepartmentId:e.target.value}))}><option value="">Tất cả công ty</option>{catalogs.departments.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
         <select value={filters.categoryId} onChange={e=>setFilters(f=>({...f,page:1,categoryId:e.target.value}))}><option value="">Tất cả loại</option>{catalogs.categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
         <select value={filters.status} onChange={e=>setFilters(f=>({...f,page:1,status:e.target.value}))}><option value="">Mọi trạng thái</option>{Object.entries(STATUS).map(([code,label])=><option key={code} value={code}>{label}</option>)}</select>
-        <button className="am-btn am-light" onClick={xlsx}><Download size={15}/> Xuất Excel</button>
+        <button type="button" className="am-btn am-light" onClick={xlsx}><Download size={15}/> Xuất Excel</button>
+        <div className="am-toolbar-actions">
+          <button type="button" className="am-btn am-light" onClick={refresh} disabled={loading}><RefreshCw size={15}/> Làm mới</button>
+          {mode==='assets'&&<button type="button" className="am-btn am-primary" onClick={()=>setEditing(null)}><Plus size={15}/> Thêm tài sản</button>}
+        </div>
       </div>
-      <div className="am-table-wrap"><table className="am-table"><thead><tr>
+      <div className="am-table-wrap"><table className="am-table am-assets-table"><thead><tr>
         <SortableHeader label="Mã tài sản" sortKey="assetCode" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
         <SortableHeader label="Loại / Tên tài sản" sortKey="assetName" activeKey={filters.sortBy} onToggle={toggleAssetSort} title="Sắp xếp theo tên tài sản; nhấn lần nữa để bỏ sắp xếp"/>
         <SortableHeader label="Công ty sở hữu" sortKey="ownerDepartmentName" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
@@ -359,7 +363,7 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
         <SortableHeader label="Trạng thái" sortKey="status" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
         <th scope="col">Thao tác</th>
       </tr></thead>
-        <tbody>{data.items.map(item=><tr key={item.id}><td><button className="am-link strong" onClick={()=>setDetail(item)}>{item.assetCode}</button></td><td><b>{item.assetName}</b><small>{item.categoryName||'Chưa phân loại'}</small></td><td>{item.ownerDepartmentName||'—'}</td><td>{item.assignedTo||'—'}</td><td>{item.serialNumber||'—'}<small>{item.ipAddress||''}</small></td><td><span className={`am-status ${item.status}`}>{STATUS[item.status]||item.status}</span></td><td><div className="am-row-actions">
+        <tbody>{data.items.map(item=><tr key={item.id}><td><button className="am-link strong" onClick={()=>setDetail(item)}>{item.assetCode}</button></td><td><b title={item.assetName}>{item.assetName}</b><small>{item.categoryName||'Chưa phân loại'}</small></td><td>{item.ownerDepartmentName||'—'}</td><td>{item.assignedTo||'—'}</td><td>{item.serialNumber||'—'}<small>{item.ipAddress||''}</small></td><td><span className={`am-status ${item.status}`}>{STATUS[item.status]||item.status}</span></td><td><div className="am-row-actions">
           {mode==='assets'?<><button title="Chi tiết / Lịch sử" onClick={()=>setDetail(item)}><History size={15}/></button><button title="Mã QR" onClick={()=>setDetail({...item,initialTab:'qr'})}><QrCode size={15}/></button><button title="Sửa" onClick={()=>setEditing(item)}><Pencil size={15}/></button><button title={item.status==='using'?'Thu hồi':'Bàn giao'} onClick={()=>setAssigning(item)}><ArrowRightLeft size={15}/></button><button title="Xóa mềm" onClick={()=>remove(item)}><Trash2 size={15}/></button></>:<button className="am-btn am-light" onClick={()=>restore(item)}><RotateCcw size={15}/> Khôi phục</button>}
           </div></td></tr>)}
           {!loading&&!data.items.length&&<tr><td colSpan={7} className="am-empty"><PackageSearch size={28}/> Chưa có tài sản phù hợp với bộ lọc.</td></tr>}
@@ -368,7 +372,7 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
       <footer className="am-pagination"><span>{data.total} tài sản · Trang {data.page}/{data.totalPages}</span><div><button disabled={filters.page<=1} onClick={()=>setFilters(f=>({...f,page:f.page-1}))}><ChevronLeft size={17}/></button><button disabled={filters.page>=data.totalPages} onClick={()=>setFilters(f=>({...f,page:f.page+1}))}><ChevronRight size={17}/></button></div></footer>
     </div>}
     {(mode==='warehouse'||mode==='stock')&&<WarehouseManagement kind={mode} refreshEpoch={warehouseRefreshEpoch} onAssignAsset={setAssigning} onShowAsset={setDetail}/>}
-    {mode==='printers'&&<PrinterManagement refreshEpoch={warehouseRefreshEpoch}/> }
+    {mode==='printers'&&<PrinterManagement user={user} refreshEpoch={warehouseRefreshEpoch}/> }
     {mode==='reports'&&<AssetReportPanel/>}
     {mode==='stocktake'&&<AssetStocktakePanel catalogs={catalogs.departments} isManager={isManager}/>}
     {mode==='backups'&&isManager&&<AssetBackupPanel/>}

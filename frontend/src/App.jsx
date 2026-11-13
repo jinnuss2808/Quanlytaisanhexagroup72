@@ -15,6 +15,7 @@ import { auth, realtimeDb } from './firebase';
 import { api } from './api';
 import { filterTicketsByType, countTicketsByType } from './ticket-list';
 import AssetManagement, { PublicAssetPage } from './AssetManagement';
+// HEXA_IT_LIBRARY_V1
 
 const STATUS = {
   new: { label: 'Mới tiếp nhận', cls: 'status-new', icon: Clock3 },

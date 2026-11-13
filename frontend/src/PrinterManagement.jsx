@@ -1,3 +1,5 @@
+// HEXA_FILTER_MODAL_REFRESH_FIX_V1
+// HEXA_IT_LIBRARY_V1
 import React, {useCallback,useEffect,useMemo,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {
@@ -99,7 +101,7 @@ function PrinterForm({printer,onClose,onSaved}){
     </div>
   </div>, document.body);
 }
-function PrinterDetail({printer,onClose,onSaved}){
+function PrinterDetail({printer,onClose,onSaved,user}){
   const [tab,setTab]=useState('history'),[historyKind,setHistoryKind]=useState('all');
   const [expandedHistoryId,setExpandedHistoryId]=useState(null);
   const [history,setHistory]=useState([]),[stock,setStock]=useState([]);
@@ -196,7 +198,7 @@ function PrinterDetail({printer,onClose,onSaved}){
     </div>
   </div>, document.body);
 }
-export default function PrinterManagement({refreshEpoch=0}){
+export default function PrinterManagement({user,refreshEpoch=0}){
   const [tab,setTab]=useState('printers'),[printers,setPrinters]=useState([]),[search,setSearch]=useState('');
   const [printerSort,setPrinterSort]=useState('');
   const [selected,setSelected]=useState(null),[editing,setEditing]=useState(null),[showCreate,setShowCreate]=useState(false);
@@ -204,8 +206,9 @@ export default function PrinterManagement({refreshEpoch=0}){
   const [inkCreateSignal,setInkCreateSignal]=useState(0);
   const refresh=useCallback(async()=>{setLoading(true);try{
     const p=await api('/assets/printers');setPrinters(Array.isArray(p.items)?p.items:[]);setError('');
-  }catch(e){setError(e.message)}finally{setLoading(false)}},[]);
-  useEffect(()=>{refresh();},[refresh,refreshEpoch,refreshId]);
+     return true;
+  }catch(e){setError(e.message);return false;}finally{setLoading(false)}},[]);
+  useEffect(()=>{refresh();},[refresh,refreshEpoch]);
   const listed=useMemo(()=>{
     const filtered=printers.filter(p=>`${p.assetCode} ${p.assetName} ${p.serialNumber||''} ${p.ipAddress||''} ${p.tonerType||''} ${p.location||''} ${p.assignedTo||''}`.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi')));
     return sortVisibleRows(filtered,printerSort,p=>printerSort==='ipAddress'?(p.ipAddress||p.location):p[printerSort]);
@@ -217,13 +220,14 @@ export default function PrinterManagement({refreshEpoch=0}){
     await refresh();
   };
   return <div className="pm-root">
-    <div className="pm-heading">
-      <div>
-        <h3>Quản lý máy in</h3>
-        <p>Quản lý máy in, mực trong kho, lịch sử đổ mực và sửa chữa</p>
-      </div>
+    {/* HEXA_UNIFIED_PRINTER_UPLOAD_20261113_V1 */}
+    <div className="pm-unified-toolbar">
+      <div className="pm-tabs" role="tablist" aria-label="Quản lý máy in và kho mực">
+      <button id="pm-tab-printers" type="button" role="tab" aria-selected={tab==='printers'} aria-controls="pm-panel-printers" className={tab==='printers'?'active':''} onClick={()=>setTab('printers')}><Printer size={17}/> Danh sách máy in ({printers.length})</button>
+      <button id="pm-tab-ink" type="button" role="tab" aria-selected={tab==='ink'} aria-controls="pm-panel-ink" className={tab==='ink'?'active':''} onClick={()=>setTab('ink')}><Package size={17}/> Mực trong kho</button>
+    </div>
       <div className="pm-heading-actions">
-        <button type="button" className="am-btn am-light" onClick={()=>setRefreshId(x=>x+1)}>
+        <button type="button" className="am-btn am-light" onClick={async()=>{setNotice('Đang làm mới dữ liệu...');const ok=await refresh();setRefreshId(x=>x+1);setNotice(ok?'Đã làm mới danh sách máy in và kho mực.':'Không thể làm mới danh sách máy in.')}} disabled={loading}>
           <RefreshCw size={16}/> Làm mới
         </button>
         {tab==='printers'
@@ -231,17 +235,13 @@ export default function PrinterManagement({refreshEpoch=0}){
           : <button type="button" className="am-btn am-primary" onClick={()=>{setNotice('');setInkCreateSignal(x=>x+1);}}><Plus size={16}/> Thêm mực</button>}
       </div>
     </div>
-    <div className="pm-tabs" role="tablist" aria-label="Quản lý máy in và kho mực">
-      <button id="pm-tab-printers" type="button" role="tab" aria-selected={tab==='printers'} aria-controls="pm-panel-printers" className={tab==='printers'?'active':''} onClick={()=>setTab('printers')}><Printer size={17}/> Danh sách máy in ({printers.length})</button>
-      <button id="pm-tab-ink" type="button" role="tab" aria-selected={tab==='ink'} aria-controls="pm-panel-ink" className={tab==='ink'?'active':''} onClick={()=>setTab('ink')}><Package size={17}/> Mực trong kho</button>
-    </div>
     {notice&&<p className="pm-message pm-ok"><CheckCircle2 size={16}/>{notice}</p>}
     {error&&<p className="pm-message pm-bad">{error}</p>}
     <div className="pm-tab-viewport">
       <section id="pm-panel-printers" className="pm-tab-panel" role="tabpanel" aria-labelledby="pm-tab-printers" hidden={tab!=='printers'}>
         <div className="am-card">
           <div className="pm-search"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm máy in theo mã, tên, IP, loại mực, vị trí..."/></div>
-          <div className="am-table-wrap"><table className="am-table"><thead><tr>
+          <div className="am-table-wrap"><table className="am-table pm-printer-table pm-printers-table"><thead><tr>
             <SortableHeader label="Mã máy in" sortKey="assetCode" activeKey={printerSort} onToggle={togglePrinterSort}/>
             <SortableHeader label="Tên máy in" sortKey="assetName" activeKey={printerSort} onToggle={togglePrinterSort}/>
             <SortableHeader label="IP / Vị trí" sortKey="ipAddress" activeKey={printerSort} onToggle={togglePrinterSort}/>
@@ -249,7 +249,7 @@ export default function PrinterManagement({refreshEpoch=0}){
             <SortableHeader label="Công ty" sortKey="ownerDepartmentName" activeKey={printerSort} onToggle={togglePrinterSort}/>
             <th scope="col">Thao tác</th>
           </tr></thead><tbody>
-            {listed.map(p=><tr key={p.id}><td><b>{p.assetCode}</b></td><td>{p.assetName}<small>{p.serialNumber||''}</small></td>
+            {listed.map(p=><tr key={p.id}><td><b>{p.assetCode}</b></td><td title={p.assetName}>{p.assetName}<small>{p.serialNumber||''}</small></td>
               <td>{p.ipAddress||'USB / chưa có IP'}<small>{p.location||''}</small></td><td>{p.tonerType||'Chưa khai báo'}</td>
               <td>{p.ownerDepartmentName||'—'}</td><td><div className="pm-row-actions">
                 <button type="button" className="am-btn am-primary" onClick={()=>setSelected(p)}><History size={14}/> Lịch sử / Đổ mực</button>
@@ -263,7 +263,7 @@ export default function PrinterManagement({refreshEpoch=0}){
         <WarehouseManagement kind="ink" embedded openCreateSignal={inkCreateSignal} refreshEpoch={refreshId+refreshEpoch}/>
       </section>
     </div>
-    {selected&&<PrinterDetail printer={selected} onClose={()=>setSelected(null)} onSaved={refresh}/>} 
+    {selected&&<PrinterDetail printer={selected} onClose={()=>setSelected(null)} onSaved={refresh} user={user}/>} 
     {(showCreate||editing)&&<PrinterForm key={editing?.id||'new'} printer={editing} onClose={()=>{setEditing(null);setShowCreate(false);}} onSaved={savedPrinter}/>} 
   </div>;
 }

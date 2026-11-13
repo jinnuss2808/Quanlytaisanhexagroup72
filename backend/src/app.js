@@ -1,3 +1,5 @@
+import itLibraryRouter from './it-library-api.js';
+// HEXA_IT_LIBRARY_V1
 import express from 'express';
 import assetRouter, { publicAssetHandler } from './asset-api.js';
 import warehouseRouter from './warehouse-api.js';
@@ -128,6 +130,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'hexa-it-hel
 app.get('/api/public/assets/:publicId', publicAssetHandler);
 app.use('/api/assets', requireIT, assetRouter);
 app.use('/api/warehouse', requireIT, warehouseRouter);
+app.use('/api/it-library', requireIT, itLibraryRouter);
 // OFF by default. This setting is persisted in Realtime Database only by a manager.
 app.get('/api/public/settings', asyncRoute(async (_req, res) => {
   res.json({ requesterWorkflowEnabled: await readWorkflow(), ticketEnabled: await readTicketEnabled() });
@@ -602,10 +605,18 @@ app.patch('/api/notifications/:id/read', requireIT, asyncRoute(async (req, res) 
   res.json({ ok: true });
 }));
 
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ error: 'JSON không hợp lệ.' });
   const status = err.status && Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
   if (status >= 500) console.error('[api]', err);
-  res.status(status).json({ error: status >= 500 ? 'Lỗi hệ thống. Vui lòng thử lại.' : err.message });
+  // HEXA_ITLIB_500_EXPOSE_V1: only explicitly safe library errors may be shown.
+  const inLibrary = String(req.originalUrl || '').startsWith('/api/it-library/');
+  const safeLibraryMessage = inLibrary && err?.expose === true && typeof err.message === 'string';
+  const traceId = inLibrary && status >= 500 ? 'ITL-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2,6).toUpperCase() : '';
+  if (traceId) console.error('[IT_LIBRARY_TRACE]', { traceId, method: req.method, path: req.path, status, code: String(err?.code || 'unknown').slice(0,80) });
+  const publicMessage = status >= 500 && !safeLibraryMessage
+    ? (traceId ? 'Thư viện IT gặp lỗi tại API (mã ' + traceId + '). Xem log backend/Vercel theo mã lỗi này.' : 'Lỗi hệ thống. Vui lòng thử lại.')
+    : err.message;
+  res.status(status).json({ error: publicMessage });
 });
 export default app;
