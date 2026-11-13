@@ -1,9 +1,11 @@
 import React, {useCallback,useEffect,useMemo,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {
   Printer,Package,RefreshCw,Search,History,Wrench,X,Save,Droplets,
   CheckCircle2,Plus,Pencil,MapPin
 } from 'lucide-react';
 import {api} from './api';
+import {formatPrinterDate,formatPrinterMoney,getPrinterRepairTotals} from './printer-history-utils.js';
 import WarehouseManagement from './WarehouseManagement.jsx';
 import './printer-management.css';
 import SortableHeader from './SortableHeader.jsx';
@@ -48,7 +50,7 @@ function PrinterForm({printer,onClose,onSaved}){
     }catch(err){setError(err.message||'Không lưu được máy in.');}
     finally{setBusy(false);}
   };
-  return <div className="pm-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+  return createPortal(<div className="pm-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
     <div className="pm-modal" role="dialog" aria-modal="true" aria-label={editing?'Sửa máy in':'Thêm máy in'}>
       <header className="pm-head"><div><small>HEXA · QUẢN LÝ MÁY IN</small>
         <h3>{editing?'Chỉnh sửa máy in':'Thêm máy in mới'}</h3>
@@ -95,11 +97,11 @@ function PrinterForm({printer,onClose,onSaved}){
         </div>
       </form></div>
     </div>
-  </div>;
+  </div>, document.body);
 }
-
 function PrinterDetail({printer,onClose,onSaved}){
   const [tab,setTab]=useState('history'),[historyKind,setHistoryKind]=useState('all');
+  const [expandedHistoryId,setExpandedHistoryId]=useState(null);
   const [history,setHistory]=useState([]),[stock,setStock]=useState([]);
   const [inkId,setInkId]=useState(''),[notes,setNotes]=useState(''),[date,setDate]=useState(dateToday());
   const [problem,setProblem]=useState(''),[solution,setSolution]=useState(''),[parts,setParts]=useState(''),[cost,setCost]=useState('0');
@@ -128,7 +130,8 @@ function PrinterDetail({printer,onClose,onSaved}){
   const tonerCount=history.filter(h=>h.type==='replace_toner').length;
   const repairCount=history.length-tonerCount;
   const visibleHistory=history.filter(h=>historyKind==='all'||(historyKind==='toner'?h.type==='replace_toner':h.type!=='replace_toner'));
-  return <div className="pm-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+  const repairTotals=getPrinterRepairTotals(history);
+  return createPortal(<div className="pm-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
     <div className="pm-modal" role="dialog" aria-modal="true" aria-label={`Máy in ${printer.assetCode}`}>
       <header className="pm-head"><div><small>HEXA · QUẢN LÝ MÁY IN</small><h3>{printer.assetName}</h3>
         <p>{printer.assetCode} · IP: {printer.ipAddress||'USB / chưa có IP'} · Mực: {printer.tonerType||'Chưa cập nhật'}</p>
@@ -137,9 +140,44 @@ function PrinterDetail({printer,onClose,onSaved}){
       <div className="pm-content">
         {notice&&<div className="pm-message pm-ok"><CheckCircle2 size={16}/>{notice}</div>}
         {error&&<div className="pm-message pm-bad">{error}</div>}
-        {tab==='history'&&<><p className="pm-help">Lịch sử được ghi theo mã máy in này, không bị mất khi đổi IP hoặc loại mực.</p>
-          <div className="pm-history-filters">{[['all',`Tất cả (${history.length})`],['toner',`Đổ mực (${tonerCount})`],['repair',`Sửa chữa (${repairCount})`]].map(([key,label])=><button key={key} className={historyKind===key?'active':''} onClick={()=>setHistoryKind(key)}>{label}</button>)}</div>
-          <div className="pm-history">{visibleHistory.map(h=><div className="pm-history-row" key={h.id}><strong>{actions[h.type]||h.type}: {h.summary}</strong><span>{when(h.at)} · {h.byName||h.performedBy||'IT'}</span>{h.stockName&&<p>Mực/vật tư: {h.stockName} ({h.stockQuantity||1})</p>}{h.replacedParts&&<p>Linh kiện: {h.replacedParts}</p>}{h.notes&&<p>{h.notes}</p>}</div>)}{!visibleHistory.length&&<p className="pm-help">Chưa có nhật ký trong nhóm này.</p>}</div></>}
+        {tab==='history'&&<div className="pm-history-view">
+          <p className="pm-help">Lịch sử gắn với hồ sơ máy in này. Bấm <b>Xem chi tiết</b> để xem ngày sửa, người sửa, linh kiện, chi phí và kết quả xử lý.</p>
+          <div className="pm-history-filters">{[['all',`Tất cả (${history.length})`],['toner',`Đổ mực (${tonerCount})`],['repair',`Sửa chữa (${repairCount})`]].map(([key,label])=><button key={key} type="button" className={historyKind===key?'active':''} onClick={()=>{setHistoryKind(key);setExpandedHistoryId(null);}}>{label}</button>)}</div>
+          <div className="pm-history">
+            {visibleHistory.map(h=>{
+              const isToner=h.type==='replace_toner';
+              const expanded=expandedHistoryId===h.id;
+              return <article className="pm-history-row" key={h.id}>
+                <div className="pm-history-row-top"><strong>{actions[h.type]||h.type}: {h.summary||'Không có mô tả'}</strong>
+                  {!isToner&&<span className="pm-cost-tag">{formatPrinterMoney(h.cost)}</span>}
+                </div>
+                <div className="pm-history-meta">
+                  <span>Ngày {isToner?'đổ mực':'sửa'}: <b>{formatPrinterDate(h.date,h.at)}</b></span>
+                  <span>Người thực hiện: <b>{h.byName||h.performedBy||'IT'}</b></span>
+                </div>
+                <button type="button" className="pm-history-expand" aria-expanded={expanded} onClick={()=>setExpandedHistoryId(expanded?null:h.id)}>{expanded?'Thu gọn chi tiết':'Xem chi tiết'}</button>
+                {expanded&&<dl className="pm-history-details">
+                  <div><dt>Loại công việc</dt><dd>{actions[h.type]||h.type}</dd></div>
+                  <div><dt>Ngày thực hiện</dt><dd>{formatPrinterDate(h.date,h.at)}</dd></div>
+                  <div><dt>Thời gian ghi nhận</dt><dd>{when(h.at)}</dd></div>
+                  <div><dt>Người thực hiện</dt><dd>{h.byName||h.performedBy||'IT'}</dd></div>
+                  {!isToner&&<div><dt>Chi phí sửa chữa</dt><dd className="pm-repair-price">{formatPrinterMoney(h.cost)}</dd></div>}
+                  {h.replacedParts&&<div className="pm-full"><dt>Linh kiện thay thế</dt><dd>{h.replacedParts}</dd></div>}
+                  {h.stockName&&<div className="pm-full"><dt>Mực / vật tư sử dụng</dt><dd>{h.stockName} (số lượng: {h.stockQuantity||1})</dd></div>}
+                  {h.serviceProvider&&<div className="pm-full"><dt>Đơn vị sửa chữa</dt><dd>{h.serviceProvider}</dd></div>}
+                  {h.ticketCode&&<div><dt>Ticket tham chiếu</dt><dd>{h.ticketCode}</dd></div>}
+                  <div className="pm-full"><dt>Kết quả xử lý / ghi chú</dt><dd>{h.notes||'Chưa có ghi chú'}</dd></div>
+                </dl>}
+              </article>;
+            })}
+            {!visibleHistory.length&&<p className="pm-help">Chưa có nhật ký trong nhóm này.</p>}
+          </div>
+          <div className="pm-repair-total" aria-label="Tổng chi phí sửa chữa máy in">
+            <div><strong>Tổng chi phí sửa chữa</strong><span>{repairTotals.count} lần sửa chữa · không tính tiền mực</span>
+            {repairTotals.unknown>0&&<small>{repairTotals.unknown} lần chưa ghi chi phí, không cộng vào tổng.</small>}</div>
+            <output>{formatPrinterMoney(repairTotals.total)}</output>
+          </div>
+        </div>}
         {tab==='toner'&&<form onSubmit={saveToner} className="pm-form"><p className="pm-help">Mực đề xuất cho máy: <b>{printer.tonerType||'Chưa khai báo'}</b>. Mỗi lần xác nhận trừ đúng <b>1</b> đơn vị tồn kho và ghi nhật ký.</p>
           <label>Loại mực trong kho *<select required value={inkId} onChange={e=>setInkId(e.target.value)}><option value="">Chọn mực có tồn kho</option>{stock.filter(x=>x.category==='ink'&&x.quantity>0).map(x=><option key={x.id} value={x.id}>{x.sku} · {x.name} — tồn {x.quantity}</option>)}</select></label>
           {selected&&<div className="pm-stock">Tồn hiện tại: <b>{selected.quantity}</b> → sau khi đổ: <b>{selected.quantity-1}</b></div>}
@@ -156,9 +194,8 @@ function PrinterDetail({printer,onClose,onSaved}){
         </form>}
       </div>
     </div>
-  </div>;
+  </div>, document.body);
 }
-
 export default function PrinterManagement({refreshEpoch=0}){
   const [tab,setTab]=useState('printers'),[printers,setPrinters]=useState([]),[search,setSearch]=useState('');
   const [printerSort,setPrinterSort]=useState('');

@@ -37,3 +37,28 @@
  .pm-tab-panel{scrollbar-gutter:auto}
 }
 .pm-heading-actions .am-primary{min-width:145px}
+
+/* HEXA_PRINTER_HISTORY_OVERLAY_V2: portal trên toàn trang, không bị thanh tab che */
+.pm-overlay{z-index:2147483000!important;isolation:isolate;}
+.pm-overlay .pm-modal{position:relative;z-index:1;max-width:calc(100vw - 32px);}
+.pm-history-view{display:flex;flex-direction:column;min-height:100%;gap:10px;}
+.pm-history-row{gap:11px;overflow-wrap:anywhere;}
+.pm-history-row-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.pm-history-row-top strong{flex:1;min-width:0;line-height:1.6;}
+.pm-cost-tag{display:inline-flex;align-items:center;flex:0 0 auto;font-weight:800;font-size:12px;color:#166b51;background:#e6f6ef;border-radius:7px;padding:6px 9px;}
+.pm-history-meta{display:flex;gap:8px 20px;flex-wrap:wrap;color:#71819b;font-size:11px;}
+.pm-history-meta b{color:#3f5270;}
+.pm-history-expand{justify-self:start;cursor:pointer;border:1px solid #cfe0fa;background:#f5f8ff;border-radius:7px;padding:7px 10px;color:#2964cf;font-size:11px;font-weight:800;}
+.pm-history-expand:hover{background:#e9f1ff;}
+.pm-history-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:2px 0 0;padding:15px;background:#f7f9fd;border:1px solid #e7edf8;border-radius:8px;}
+.pm-history-details>div{min-width:0;}
+.pm-history-details .pm-full{grid-column:1/-1;}
+.pm-history-details dt{color:#8796ab;font-size:10px;margin-bottom:5px;}
+.pm-history-details dd{margin:0;font-size:12px;color:#2f4261;font-weight:700;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;}
+.pm-history-details .pm-repair-price{color:#15825e;}
+.pm-repair-total{position:sticky;bottom:-20px;display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:auto;padding:16px 14px;background:#f4f8ff;border:1px solid #ccdcf5;border-radius:10px;box-shadow:0 -4px 14px #132a5412;}
+.pm-repair-total>div{display:grid;gap:4px;}
+.pm-repair-total strong{font-size:13px;color:#243a5b;}
+.pm-repair-total span,.pm-repair-total small{color:#7184a2;font-size:11px;}
+.pm-repair-total output{color:#165db4;font-size:18px;font-weight:900;white-space:nowrap;font-variant-numeric:tabular-nums;}
+@media(max-width:640px){.pm-history-row-top{flex-wrap:wrap}.pm-history-details{grid-template-columns:1fr}.pm-history-details .pm-full{grid-column:auto}.pm-repair-total{align-items:flex-start;flex-direction:column}.pm-repair-total output{font-size:17px}}
