@@ -20,7 +20,7 @@
 .pm-heading-actions{flex:0 0 auto}
 .pm-tabs{flex:0 0 auto;flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:thin}
 .pm-tabs button{white-space:nowrap;flex:0 0 auto;transition:background-color .16s ease,color .16s ease,box-shadow .16s ease}
-.pm-tab-viewport{height:clamp(520px,calc(100vh - 355px),720px);width:100%;min-width:0;max-width:100%;overflow:hidden;position:relative;background:transparent}
+.pm-tab-viewport{height:clamp(600px,calc(100dvh - 255px),920px);width:100%;min-width:0;max-width:100%;overflow:hidden;position:relative;background:transparent}
 .pm-tab-panel{height:100%;width:100%;min-width:0;max-width:100%;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:1px}
 .pm-tab-panel[hidden]{display:none!important}
 .pm-tab-panel>.am-card{min-width:0;width:100%;box-sizing:border-box}
@@ -177,3 +177,16 @@
 .pm-root .pm-printers-table th .am-sort-toggle {white-space:normal;}
 .pm-root .pm-tab-viewport{height:clamp(650px,calc(100dvh - 240px),1150px);min-height:650px;}
 @media(max-width:800px){.pm-root .pm-tab-viewport{height:620px;min-height:560px}}
+
+
+/* HEXA_PRINTER_HEIGHT_AND_TEXT_20261113_V1 */
+.pm-printers-table td,.pm-printers-table td small{color:#4d6f69}
+.pm-printers-table td b{color:#1e5a53}
+.pm-printers-table td{font-size:12.5px;line-height:1.45}
+.pm-printers-table td small{font-size:10.5px;font-weight:600}
+.pm-printers-table .pm-row-actions{flex-wrap:nowrap;align-items:center}
+.pm-printers-table .pm-row-actions .am-btn{white-space:nowrap}
+.pm-search input{font-size:12.5px;color:#2a5953;font-weight:600}
+@media (max-height: 760px){
+  .pm-tab-viewport{height:calc(100dvh - 235px)}
+}

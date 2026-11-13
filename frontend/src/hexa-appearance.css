@@ -337,3 +337,26 @@ html[data-hexa-theme="dark"] .pm-overlay .pm-history-filters button.active { bac
   .pm-root > .pm-heading { min-height: 38px !important; }
   .pm-root > .pm-heading .pm-heading-actions { width: auto !important; }
 }
+
+
+/* HEXA_LIGHT_TEXT_CLARITY_20261113_V1 */
+html[data-hexa-theme="light"] .am-table td,
+html[data-hexa-theme="light"] .responsive-table td,
+html[data-hexa-theme="light"] .pm-search input,
+html[data-hexa-theme="light"] .am-filter-bar input,
+html[data-hexa-theme="light"] .am-filter-bar select,
+html[data-hexa-theme="light"] .search-input input,
+html[data-hexa-theme="light"] .small-select select{
+  color:#355f58!important;
+}
+html[data-hexa-theme="light"] .am-table td b,
+html[data-hexa-theme="light"] .pm-head h3,
+html[data-hexa-theme="light"] .panel-header h3,
+html[data-hexa-theme="light"] .list-top h3{
+  color:#174d46!important;
+}
+html[data-hexa-theme="light"] .am-table td small,
+html[data-hexa-theme="light"] .date-cell,
+html[data-hexa-theme="light"] .pm-history-row span{
+  color:#688983!important;
+}

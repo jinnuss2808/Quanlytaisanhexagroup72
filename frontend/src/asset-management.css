@@ -465,3 +465,18 @@ html[data-hexa-theme="dark"] .am-overlay.am-warehouse-dialog-overlay input,html[
  .am-root .am-tab-stage {height:clamp(480px,calc(100dvh - 280px),920px);min-height:480px;}
  .am-root .am-card.am-asset-list-card {height:clamp(480px,calc(100dvh - 280px),920px);max-height:920px;}
 }
+
+
+/* HEXA_TEXT_CRISP_20261113_V1 */
+.am-root,.am-root button,.am-root input,.am-root select,.am-root textarea{
+  text-rendering:optimizeLegibility;
+  -webkit-font-smoothing:auto;
+  -moz-osx-font-smoothing:auto;
+}
+.am-heading h2,.am-heading h3,.am-stat strong,.am-table td b,.am-detail-grid strong,.am-modal-header h2,.am-warehouse .am-padded h3{color:#214f49!important}
+.am-heading p,.am-muted,.am-public-card .am-muted,.am-detail-grid small,.am-modal-header p{color:#5d7d77!important}
+.am-table td{color:#4f6f69!important;font-size:12.5px;font-weight:500;line-height:1.45}
+.am-table td small{color:#6f8f89!important;font-size:10.5px;font-weight:600}
+.am-table th{color:#6c8882!important;font-size:10.5px;font-weight:800;letter-spacing:.2px}
+.am-filter-bar input,.am-filter-bar select,.am-search-input input,.pm-search input{color:#2f5a54!important;font-weight:600}
+.am-btn{font-weight:800}
