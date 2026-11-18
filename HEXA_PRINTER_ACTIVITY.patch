@@ -1,0 +1,360 @@
+diff --git a/backend/src/asset-api.js b/backend/src/asset-api.js
+index 0c65cc1..f2d5a05 100644
+--- a/backend/src/asset-api.js
++++ b/backend/src/asset-api.js
+@@ -7,6 +7,7 @@ import { readAssetExcel,writeAssetExcel } from './asset-excel.js';
+ import { prepareExcelImport } from './asset-xlsx-import.js';
+ import { quantity,stockChange } from './warehouse-core.js';
+ import { isPrinterAsset, validatePrinterToner, normalizePrinterDetails } from './printer-core.js';
++import { listPrinterActivity } from './printer-activity.js';
+ import { auditChanges, lowStockItems, assetReport, resolveStocktakeAsset, stocktakeProgress } from './asset-ops.js';
+ import { collectInventoryBackup, zippedInventoryBackup } from './asset-backup.js';
+ import { recordStockThreshold } from './stock-alerts.js';
+@@ -223,6 +224,20 @@ router.post('/import.xlsx',requireManager,express.raw({type:['application/vnd.op
+   catch(err){await Promise.all(reserved.map(key=>db.ref('assetCodeIndex/'+key).remove().catch(()=>{})));throw err;}
+   res.json({created,skipped,categoriesCreated:plan.newCategories.length,departmentsCreated:plan.newDepartments.length,errors:[]});
+ }));
++// Nhật ký tập trung cho tất cả máy in: chỉ đọc sự kiện đã lưu, không trừ kho lần nữa.
++// Đặt trước các route động /:id để tránh xung đột với đường dẫn API.
++router.get('/printers/activity',wrap(async(req,res)=>{
++  const [assets,maintenance,{cats,depts}]=await Promise.all([
++    obj('assets'),obj('assetMaintenance'),catalogs()
++  ]);
++  // Giữ lịch sử máy in đã đưa vào thùng rác để có thể tra cứu/audit.
++  const printers=Object.values(assets).map(item=>enrichAsset(item,cats,depts)).filter(isPrinterAsset);
++  const result=listPrinterActivity(printers,maintenance,{
++    kind:req.query.kind,search:req.query.search,page:req.query.page,pageSize:req.query.pageSize
++  });
++  res.json(result);
++}));
++
+ // Printer fleet is a view over existing asset records; no duplicated device database.
+ router.get('/printers',wrap(async(_req,res)=>{
+   const [assets,{cats,depts}]=await Promise.all([obj('assets'),catalogs()]);
+diff --git a/backend/src/printer-activity.js b/backend/src/printer-activity.js
+new file mode 100644
+index 0000000..62cbca4
+--- /dev/null
++++ b/backend/src/printer-activity.js
+@@ -0,0 +1,57 @@
++/**
++ * Tổng hợp lịch sử bảo trì/đổ mực từ assetMaintenance, không tạo dữ liệu trùng.
++ * Danh sách máy in được nhận diện bởi caller (printer-core.js).
++ * Tách hàm thuần để kiểm thử độc lập với Firebase.
++ */
++export const PRINTER_ACTIVITY_TYPES = Object.freeze([
++  'replace_toner', 'repair', 'printer_service', 'replace_part', 'maintenance'
++]);
++const KNOWN_TYPES = new Set(PRINTER_ACTIVITY_TYPES);
++
++export function listPrinterActivity(printers = [], maintenanceByAsset = {}, options = {}) {
++  const rows = [];
++  for (const printer of printers) {
++    if (!printer?.id) continue;
++    const history = maintenanceByAsset?.[printer.id] || {};
++    if (!history || typeof history !== 'object' || Array.isArray(history)) continue;
++    for (const [key, event] of Object.entries(history)) {
++      if (!event || typeof event !== 'object' || !KNOWN_TYPES.has(event.type)) continue;
++      rows.push({
++        id: String(event.id || key),
++        printerId: printer.id,
++        assetCode: printer.assetCode || '',
++        assetName: printer.assetName || 'Máy in chưa có tên',
++        ipAddress: printer.ipAddress || '',
++        location: printer.location || '',
++        deleted: Boolean(printer.deletedAt),
++        type: event.type,
++        date: event.date || '',
++        at: Number.isFinite(Number(event.at)) ? Number(event.at) : 0,
++        summary: event.summary || '',
++        notes: event.notes || '',
++        byName: event.byName || event.performedBy || '',
++        performedBy: event.performedBy || '',
++        replacedParts: event.replacedParts || '',
++        serviceProvider: event.serviceProvider || '',
++        stockName: event.stockName || '',
++        stockQuantity: event.stockQuantity || null,
++        cost: Number.isFinite(Number(event.cost)) ? Number(event.cost) : null,
++      });
++    }
++  }
++  const kind = options.kind === 'toner' || options.kind === 'repair' ? options.kind : 'all';
++  const q = String(options.search || '').trim().toLocaleLowerCase('vi');
++  const filtered = rows.filter(row => {
++    if (kind === 'toner' && row.type !== 'replace_toner') return false;
++    if (kind === 'repair' && row.type === 'replace_toner') return false;
++    return !q || [row.assetCode,row.assetName,row.ipAddress,row.location,row.type,
++      row.summary,row.notes,row.byName,row.stockName,row.replacedParts]
++      .some(value => String(value ?? '').toLocaleLowerCase('vi').includes(q));
++  });
++  filtered.sort((a,b)=>b.at-a.at || b.date.localeCompare(a.date) ||
++    a.assetCode.localeCompare(b.assetCode,'vi') || a.id.localeCompare(b.id,'vi'));
++  const pageSize = Math.min(100, Math.max(1, Math.floor(Number(options.pageSize) || 30)));
++  const page = Math.max(1, Math.floor(Number(options.page) || 1));
++  return {items:filtered.slice((page-1)*pageSize,page*pageSize),total:filtered.length,
++    page,pageSize,totalPages:Math.max(1,Math.ceil(filtered.length/pageSize))};
++}
+diff --git a/backend/test/printer-activity.test.js b/backend/test/printer-activity.test.js
+new file mode 100644
+index 0000000..c40b0ed
+--- /dev/null
++++ b/backend/test/printer-activity.test.js
+@@ -0,0 +1,48 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {listPrinterActivity} from '../src/printer-activity.js';
++
++const printers = [
++  {id:'a1',assetCode:'HXG-R6054',assetName:'Ricoh 6054',ipAddress:'192.168.1.214'},
++  {id:'a2',assetCode:'HXG-HP',assetName:'HP M404',ipAddress:'192.168.1.215'},
++  {id:'a3',assetCode:'HXG-OLD',assetName:'Canon cũ',deletedAt:123}
++];
++const data={
++  a1:{
++    toner:{id:'toner',type:'replace_toner',summary:'Đổ 1 túi VMAX 6054',notes:'Đã kiểm tra',date:'2026-11-18',at:1794970200000,byName:'IT A'},
++    service:{id:'service',type:'printer_service',summary:'Sửa kẹt giấy',at:1794960000000,byName:'IT B',replacedParts:'Lô sấy',cost:250000},
++    meta:{type:'created',at:9999999999999}
++  },
++  a2:{s:{id:'s',type:'maintenance',summary:'Bảo dưỡng',at:1794970400000}},
++  a3:{s:{id:'s',type:'repair',summary:'Lỗi sấy',at:100}},
++  other:{s:{id:'s',type:'replace_toner',at:1000}}
++};
++
++test('gộp đổ mực và sửa chữa của nhiều máy, không lẫn nhật ký CRUD',()=>{
++ const x=listPrinterActivity(printers,data);
++ assert.equal(x.total,4);
++ assert.equal(x.items[0].assetName,'HP M404');
++ assert.equal(x.items[1].assetName,'Ricoh 6054');
++ assert.equal(x.items[1].ipAddress,'192.168.1.214');
++ assert.equal(x.items[1].type,'replace_toner');
++ assert.equal(x.items[2].type,'printer_service');
++ assert.equal(x.items[3].deleted,true);
++});
++test('lọc đổ mực và sửa chữa không bị trùng, tìm bằng tên máy và IP',()=>{
++ assert.equal(listPrinterActivity(printers,data,{kind:'toner'}).total,1);
++ assert.equal(listPrinterActivity(printers,data,{kind:'repair'}).total,3);
++ assert.equal(listPrinterActivity(printers,data,{search:'ricoh'}).total,2);
++ assert.equal(listPrinterActivity(printers,data,{search:'192.168.1.214'}).total,2);
++ assert.equal(listPrinterActivity(printers,data,{search:'lô sấy'}).total,1);
++});
++test('phân trang không làm mất tổng số lịch sử',()=>{
++ const result=listPrinterActivity(printers,data,{page:2,pageSize:2});
++ assert.equal(result.total,4);
++ assert.equal(result.totalPages,2);
++ assert.equal(result.items.length,2);
++ assert.equal(result.items[0].type,'printer_service');
++});
++test('chịu dữ liệu rỗng và sự kiện lỗi',()=>{
++ assert.equal(listPrinterActivity([],{}).total,0);
++ assert.equal(listPrinterActivity([{id:'x'}],{x:{one:null,two:{type:'wrong'},three:{type:'repair',at:'abc'}}}).total,1);
++});
+diff --git a/frontend/src/PrinterActivity.jsx b/frontend/src/PrinterActivity.jsx
+new file mode 100644
+index 0000000..e52536a
+--- /dev/null
++++ b/frontend/src/PrinterActivity.jsx
+@@ -0,0 +1,99 @@
++import React, {useEffect,useState} from 'react';
++import {History,Search,Printer,Clock3,Droplets,Wrench,ChevronDown,ChevronUp} from 'lucide-react';
++import {api} from './api';
++import {formatPrinterMoney} from './printer-history-utils.js';
++
++const labels={
++  replace_toner:'Đổ mực',printer_service:'Sửa chữa',repair:'Sửa chữa',
++  replace_part:'Thay linh kiện',maintenance:'Bảo trì'
++};
++const formattedTime=new Intl.DateTimeFormat('vi-VN',{
++  timeZone:'Asia/Ho_Chi_Minh',day:'2-digit',month:'2-digit',year:'numeric',
++  hour:'2-digit',minute:'2-digit',hour12:false
++});
++function displayTime(item){
++  if(Number.isFinite(item.at)&&item.at>0) return formattedTime.format(new Date(item.at));
++  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(item.date||'');
++  return m?`${m[3]}/${m[2]}/${m[1]}`:'Không rõ thời gian';
++}
++function workDate(date){
++  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(date||'');
++  return m?`${m[3]}/${m[2]}/${m[1]}`:null;
++}
++
++/** Nhật ký tập trung; chỉ đọc dữ liệu từ API, không ghi/chỉnh tồn kho. */
++export default function PrinterActivity({active,refreshEpoch=0}){
++  const [query,setQuery]=useState('');
++  const [search,setSearch]=useState('');
++  const [kind,setKind]=useState('all');
++  const [page,setPage]=useState(1);
++  const [result,setResult]=useState({items:[],total:0,totalPages:1,page:1});
++  const [loading,setLoading]=useState(false),[error,setError]=useState('');
++  const [expanded,setExpanded]=useState(null);
++  useEffect(()=>{
++    const timer=setTimeout(()=>{setSearch(query.trim());setPage(1);},250);
++    return ()=>clearTimeout(timer);
++  },[query]);
++  useEffect(()=>{
++    if(!active)return;
++    let alive=true;
++    setLoading(true);setError('');
++    const params=new URLSearchParams({kind,search,page:String(page),pageSize:'30'});
++    api(`/assets/printers/activity?${params}`)
++      .then(data=>{if(alive){setResult({items:Array.isArray(data.items)?data.items:[],total:data.total||0,totalPages:data.totalPages||1,page:data.page||1});setExpanded(null);}})
++      .catch(err=>{if(alive)setError(err.message||'Không tải được nhật ký.');})
++      .finally(()=>{if(alive)setLoading(false);});
++    return ()=>{alive=false;};
++  },[active,kind,search,page,refreshEpoch]);
++  const updateKind=value=>{setKind(value);setPage(1);};
++  return <div className="am-card pm-global-activity">
++    <div className="pm-activity-toolbar">
++      <div className="pm-activity-search"><Search size={17}/><input aria-label="Tìm kiếm lịch sử máy in" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Tìm theo tên máy, IP, công việc, người thực hiện..."/></div>
++      <div className="pm-activity-filters" role="group" aria-label="Lọc lịch sử">
++        {[['all','Tất cả'],['toner','Đổ mực'],['repair','Sửa chữa / bảo trì']].map(([value,label])=><button type="button" key={value} className={kind===value?'active':''} aria-pressed={kind===value} onClick={()=>updateKind(value)}>{label}</button>)}
++      </div>
++    </div>
++    <div className="pm-activity-summary"><History size={16}/><strong>{result.total}</strong> lượt hoạt động {loading?'· Đang tải...':''}<span>Hiển thị mới nhất trước · Giờ Việt Nam</span></div>
++    {error&&<div className="pm-message pm-bad" role="alert">{error} — Cần deploy backend HEXA có API lịch sử trước khi sử dụng tab này.</div>}
++    <div className="am-table-wrap pm-activity-table-wrap">
++      <table className="am-table pm-activity-table">
++        <thead><tr><th>Thời gian</th><th>Máy in / IP</th><th>Hoạt động</th><th>Nội dung / Người thực hiện</th><th>Chi tiết</th></tr></thead>
++        <tbody>
++        {result.items.map(item=>{
++          const id=`${item.printerId}:${item.id}`;
++          const open=expanded===id;
++          const isToner=item.type==='replace_toner';
++          return <React.Fragment key={id}>
++            <tr>
++              <td className="pm-activity-time"><Clock3 size={14}/><time dateTime={item.at?new Date(item.at).toISOString():undefined}>{displayTime(item)}</time></td>
++              <td><div className="pm-activity-machine"><Printer size={15}/><strong>{item.assetName}</strong></div><small>{item.ipAddress||'Không có IP'}{item.deleted?' · Đã xóa':''}</small></td>
++              <td><span className={`pm-activity-type ${isToner?'toner':'repair'}`}>{isToner?<Droplets size={14}/>:<Wrench size={14}/>} {labels[item.type]||item.type}</span></td>
++              <td><strong className="pm-activity-note">{item.summary||labels[item.type]||'Công việc máy in'}</strong><small>{item.byName||'Nhân viên IT'}</small></td>
++              <td><button type="button" className="pm-activity-details-btn" aria-expanded={open} onClick={()=>setExpanded(open?null:id)}>{open?<ChevronUp size={15}/>:<ChevronDown size={15}/>} {open?'Thu gọn':'Xem'}</button></td>
++            </tr>
++            {open&&<tr className="pm-activity-expanded"><td colSpan={5}>
++              <div className="pm-activity-info-grid">
++                <div><span>Mã máy in</span><strong>{item.assetCode||'—'}</strong></div>
++                <div><span>IP / Vị trí</span><strong>{item.ipAddress||'Không có IP'}{item.location?` · ${item.location}`:''}</strong></div>
++                <div><span>Ngày công việc</span><strong>{workDate(item.date)||displayTime(item)}</strong></div>
++                <div><span>Người thực hiện</span><strong>{item.byName||item.performedBy||'IT'}</strong></div>
++                {!isToner&&<div><span>Chi phí sửa chữa</span><strong>{item.cost==null?'Chưa khai báo':formatPrinterMoney(item.cost)}</strong></div>}
++                {item.stockName&&<div><span>Mực / Vật tư</span><strong>{item.stockName} · SL: {item.stockQuantity||1}</strong></div>}
++                {item.replacedParts&&<div><span>Linh kiện đã thay</span><strong>{item.replacedParts}</strong></div>}
++                {item.serviceProvider&&<div><span>Đơn vị sửa chữa</span><strong>{item.serviceProvider}</strong></div>}
++                <div className="pm-activity-wide"><span>Ghi chú / Kết quả</span><strong>{item.notes||'Không có ghi chú'}</strong></div>
++              </div>
++            </td></tr>}
++          </React.Fragment>;
++        })}
++        {!loading&&!error&&!result.items.length&&<tr><td colSpan={5} className="pm-empty">Chưa có lịch sử phù hợp. Khi đổ mực hoặc ghi sửa chữa, hoạt động sẽ xuất hiện ở đây.</td></tr>}
++        {loading&&!result.items.length&&<tr><td colSpan={5} className="pm-empty">Đang tải lịch sử...</td></tr>}
++        </tbody>
++      </table>
++    </div>
++    <div className="pm-activity-pagination">
++      <span>Trang {result.page}/{result.totalPages} · Tổng {result.total} lượt</span>
++      <div><button type="button" disabled={loading||page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Trang trước</button><button type="button" disabled={loading||page>=result.totalPages} onClick={()=>setPage(p=>p+1)}>Trang sau</button></div>
++    </div>
++  </div>;
++}
+diff --git a/frontend/src/PrinterManagement.jsx b/frontend/src/PrinterManagement.jsx
+index 5a5de4e..930f9a4 100644
+--- a/frontend/src/PrinterManagement.jsx
++++ b/frontend/src/PrinterManagement.jsx
+@@ -9,6 +9,7 @@ import {
+ import {api} from './api';
+ import {formatPrinterDate,formatPrinterMoney,getPrinterRepairTotals} from './printer-history-utils.js';
+ import WarehouseManagement from './WarehouseManagement.jsx';
++import PrinterActivity from './PrinterActivity.jsx';
+ import './printer-management.css';
+ import SortableHeader from './SortableHeader.jsx';
+ import {sortVisibleRows,toggleColumnSort} from './table-sort.js';
+@@ -225,6 +226,7 @@ export default function PrinterManagement({user,refreshEpoch=0}){
+       <div className="pm-tabs" role="tablist" aria-label="Quản lý máy in và kho mực">
+       <button id="pm-tab-printers" type="button" role="tab" aria-selected={tab==='printers'} aria-controls="pm-panel-printers" className={tab==='printers'?'active':''} onClick={()=>setTab('printers')}><Printer size={17}/> Danh sách máy in ({printers.length})</button>
+       <button id="pm-tab-ink" type="button" role="tab" aria-selected={tab==='ink'} aria-controls="pm-panel-ink" className={tab==='ink'?'active':''} onClick={()=>setTab('ink')}><Package size={17}/> Mực trong kho</button>
++      <button id="pm-tab-activity" type="button" role="tab" aria-selected={tab==='activity'} aria-controls="pm-panel-activity" className={tab==='activity'?'active':''} onClick={()=>setTab('activity')}><History size={17}/> Lịch sử sửa chữa / Đổ mực</button>
+     </div>
+       <div className="pm-heading-actions">
+         <button type="button" className="am-btn am-light" onClick={async()=>{setNotice('Đang làm mới dữ liệu...');const ok=await refresh();setRefreshId(x=>x+1);setNotice(ok?'Đã làm mới danh sách máy in và kho mực.':'Không thể làm mới danh sách máy in.')}} disabled={loading}>
+@@ -232,7 +234,9 @@ export default function PrinterManagement({user,refreshEpoch=0}){
+         </button>
+         {tab==='printers'
+           ? <button type="button" className="am-btn am-primary" onClick={()=>{setNotice('');setShowCreate(true);}}><Plus size={16}/> Thêm máy in</button>
+-          : <button type="button" className="am-btn am-primary" onClick={()=>{setNotice('');setInkCreateSignal(x=>x+1);}}><Plus size={16}/> Thêm mực</button>}
++          : tab==='ink'
++            ? <button type="button" className="am-btn am-primary" onClick={()=>{setNotice('');setInkCreateSignal(x=>x+1);}}><Plus size={16}/> Thêm mực</button>
++            : null}
+       </div>
+     </div>
+     {notice&&<p className="pm-message pm-ok"><CheckCircle2 size={16}/>{notice}</p>}
+@@ -262,6 +266,9 @@ export default function PrinterManagement({user,refreshEpoch=0}){
+       <section id="pm-panel-ink" className="pm-tab-panel" role="tabpanel" aria-labelledby="pm-tab-ink" hidden={tab!=='ink'}>
+         <WarehouseManagement kind="ink" embedded openCreateSignal={inkCreateSignal} refreshEpoch={refreshId+refreshEpoch}/>
+       </section>
++      <section id="pm-panel-activity" className="pm-tab-panel" role="tabpanel" aria-labelledby="pm-tab-activity" hidden={tab!=='activity'}>
++        <PrinterActivity active={tab==='activity'} refreshEpoch={refreshId+refreshEpoch}/>
++      </section>
+     </div>
+     {selected&&<PrinterDetail printer={selected} onClose={()=>setSelected(null)} onSaved={refresh} user={user}/>} 
+     {(showCreate||editing)&&<PrinterForm key={editing?.id||'new'} printer={editing} onClose={()=>{setEditing(null);setShowCreate(false);}} onSaved={savedPrinter}/>} 
+diff --git a/frontend/src/printer-management.css b/frontend/src/printer-management.css
+index e914857..5e856c0 100644
+--- a/frontend/src/printer-management.css
++++ b/frontend/src/printer-management.css
+@@ -190,3 +190,59 @@
+ @media (max-height: 760px){
+   .pm-tab-viewport{height:calc(100dvh - 235px)}
+ }
++
++/* HEXA_PRINTER_GLOBAL_ACTIVITY_V1 — lịch sử của tất cả máy in */
++.pm-root .pm-activity-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px;border-bottom:1px solid #e2efeb;flex:0 0 auto}
++.pm-root .pm-activity-search{flex:1 1 300px;display:flex;align-items:center;gap:8px;min-width:190px;height:38px;border:1px solid #d5e9e3;border-radius:9px;padding:0 12px;color:#477d72}
++.pm-root .pm-activity-search input{height:100%;min-width:0;width:100%;border:0;outline:0;background:transparent;color:#244e47;font-size:12.5px;font-weight:600}
++.pm-root .pm-activity-filters{display:flex;gap:5px;flex-wrap:wrap}
++.pm-root .pm-activity-filters button{border:1px solid #d9eae5;background:#fff;border-radius:8px;padding:9px 11px;font-size:11px;white-space:nowrap;font-weight:750;color:#486f66;cursor:pointer}
++.pm-root .pm-activity-filters button.active{background:#0b6b5e;color:#fff;border-color:#0b6b5e}
++.pm-root .pm-activity-summary{display:flex;align-items:center;gap:6px;padding:9px 14px;color:#46796e;font-size:12px;font-weight:600;flex:0 0 auto}
++.pm-root .pm-activity-summary>span{margin-left:auto;font-size:11px;font-weight:500;color:#6c8c84}
++.pm-root .pm-activity-table-wrap{flex:1 1 auto!important;min-height:0;overflow:auto!important}
++.pm-root .pm-activity-table{table-layout:fixed;width:100%;min-width:790px}
++.pm-root .pm-activity-table th{position:sticky;top:0;z-index:2}
++.pm-root .pm-activity-table th:nth-child(1){width:18%}
++.pm-root .pm-activity-table th:nth-child(2){width:24%}
++.pm-root .pm-activity-table th:nth-child(3){width:17%}
++.pm-root .pm-activity-table th:nth-child(4){width:29%}
++.pm-root .pm-activity-table th:nth-child(5){width:12%}
++.pm-root .pm-activity-table td{white-space:normal;overflow-wrap:anywhere;vertical-align:middle;padding:12px 10px}
++.pm-root .pm-activity-table td small{display:block;margin-top:5px;color:#658b83;font-size:11px}
++.pm-root .pm-activity-time{font-weight:750;font-variant-numeric:tabular-nums;color:#1f5c52!important}
++.pm-root .pm-activity-time svg{vertical-align:middle;margin-right:5px;color:#589184}
++.pm-root .pm-activity-machine{display:flex;gap:6px;align-items:center}
++.pm-root .pm-activity-machine strong{color:#15584f;font-size:12.5px}
++.pm-root .pm-activity-machine svg{color:#548e80;flex-shrink:0}
++.pm-root .pm-activity-type{display:inline-flex;gap:5px;align-items:center;border-radius:7px;padding:7px 9px;font-weight:800;font-size:11px;white-space:nowrap}
++.pm-root .pm-activity-type.toner{background:#e4f5ef;color:#086a52}
++.pm-root .pm-activity-type.repair{background:#fff1df;color:#8a5a1a}
++.pm-root .pm-activity-note{display:block;color:#315e55;font-size:12px;line-height:1.4}
++.pm-root .pm-activity-details-btn{display:inline-flex;gap:3px;align-items:center;justify-content:center;padding:7px;border:1px solid #cfe7de;border-radius:7px;background:transparent;color:#0b6b5e;font-size:11px;font-weight:750;cursor:pointer;white-space:nowrap}
++.pm-root .pm-activity-expanded>td{background:#f4faf8!important;padding:12px 18px!important}
++.pm-root .pm-activity-info-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
++.pm-root .pm-activity-info-grid>div{min-width:0;display:grid;gap:4px}
++.pm-root .pm-activity-info-grid span{font-size:10.5px;color:#628b82;font-weight:600}
++.pm-root .pm-activity-info-grid strong{font-size:12px;line-height:1.5;color:#244f47;white-space:pre-wrap;overflow-wrap:anywhere}
++.pm-root .pm-activity-info-grid .pm-activity-wide{grid-column:1/-1}
++.pm-root .pm-activity-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-top:1px solid #e2efeb;flex:0 0 auto;color:#56796f;font-size:11px}
++.pm-root .pm-activity-pagination>div{display:flex;gap:6px}
++.pm-root .pm-activity-pagination button{border:1px solid #cfe5de;border-radius:7px;background:transparent;color:#175e53;padding:7px 10px;cursor:pointer;font-size:11px;font-weight:750}
++.pm-root .pm-activity-pagination button:disabled{opacity:.4;cursor:not-allowed}
++@media(max-width:760px){.pm-root .pm-activity-summary>span{display:none}.pm-root .pm-activity-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-toolbar,
++html[data-hexa-theme="dark"] .pm-root .pm-activity-summary,
++html[data-hexa-theme="dark"] .pm-root .pm-activity-pagination{border-color:#36564e;color:#c6ddd5}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-filters button,
++html[data-hexa-theme="dark"] .pm-root .pm-activity-details-btn,
++html[data-hexa-theme="dark"] .pm-root .pm-activity-pagination button{background:#233e35;color:#d0e9e0;border-color:#42685c}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-filters button.active{background:#147e6d;color:#fff}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-expanded>td{background:#203c32!important}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-info-grid strong,
++html[data-hexa-theme="dark"] .pm-root .pm-activity-note,
++html[data-hexa-theme="dark"] .pm-root .pm-activity-machine strong,
++html[data-hexa-theme="dark"] .pm-root .pm-activity-time{color:#e3f4ed!important}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-search{border-color:#42685c}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-type.toner{background:#215345;color:#c9f7e3}
++html[data-hexa-theme="dark"] .pm-root .pm-activity-type.repair{background:#5a492e;color:#ffe3ac}

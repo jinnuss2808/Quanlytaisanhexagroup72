@@ -1,0 +1,44 @@
+HEXA - THEM TAB LICH SU SUA CHUA / DO MUC TOAN BO MAY IN
+Ngay 18/11/2026
+
+SOURCE DOI CHIEU: ma nguon HEXA OneClick GitHub/Vercel nguoi dung da cung cap.
+Ban va khong chua .env, service-account.json, node_modules hay BAT.
+
+Da them:
+- Tab 'Lich su sua chua / Do muc' canh 'Danh sach may in' va 'Muc trong kho'.
+- API co quyen GET /api/assets/printers/activity, tong hop ban ghi assetMaintenance cua TAT CA may in.
+- Cot thoi gian ghi nhan (mua gio Viet Nam), ten may, IP, hanh dong, noi dung, nguoi thuc hien.
+- Loc Tat ca / Do muc / Sua chua-bao tri, tim ten/IP/ghi chu, xem chi tiet, phan trang.
+- Khong thay doi du lieu Firebase, khong them bien moi truong.
+
+CAI DAT AN TOAN TREN PROJECT DANG PUSH GITHUB:
+1. Sao luu project hoac git commit cac thay doi dang thuc hien truoc.
+2. Copy file HEXA_PRINTER_ACTIVITY.patch vao THU MUC GOC co .git, frontend, backend.
+3. Mo PowerShell trong thu muc goc va chay:
+   git apply --check .\HEXA_PRINTER_ACTIVITY.patch
+   git apply .\HEXA_PRINTER_ACTIVITY.patch
+4. Neu buoc 3 bao loi, DUNG LAI (khong chep de ca file cu), vi source o may ban da khac ban doi chieu.
+5. Kiem tra backend va frontend:
+   cd backend
+   npm test
+   cd ..\frontend
+   npm ci --include=dev
+   npm run build
+   cd ..
+6. Neu da cau hinh Git integration cho CA HAI project Vercel:
+   git add backend/src/asset-api.js backend/src/printer-activity.js backend/test/printer-activity.test.js frontend/src/PrinterManagement.jsx frontend/src/PrinterActivity.jsx frontend/src/printer-management.css
+   git commit -m "Add printer fleet maintenance and toner history"
+   git push origin main
+7. Backend Vercel Root Directory = backend, frontend Vercel Root Directory = frontend.
+   Cho backend deploy va kiem tra xong truoc khi su dung tab moi.
+
+NEU MUON CHEP DE TRUC TIEP:
+Sao chep dung cac file trong backend/src, backend/test, frontend/src va ghi de file trung ten.
+CANH BAO: Neu ban da sua them source sau ban ZIP goc, ghi de co the mat thay doi;
+nen dung git apply nhu tren.
+
+DANH GIA:
+- Node backend tests: 116/116 PASS (bao gom 4 test moi).
+- Frontend logic tests: 15/15 PASS.
+- JSX parse TypeScript: 0 loi; CSS parse: 0 loi.
+- Chua kiem thu end-to-end voi Firebase/Vercel production cua nguoi dung.

@@ -9,6 +9,7 @@ import {
 import {api} from './api';
 import {formatPrinterDate,formatPrinterMoney,getPrinterRepairTotals} from './printer-history-utils.js';
 import WarehouseManagement from './WarehouseManagement.jsx';
+import PrinterActivity from './PrinterActivity.jsx';
 import './printer-management.css';
 import SortableHeader from './SortableHeader.jsx';
 import {sortVisibleRows,toggleColumnSort} from './table-sort.js';
@@ -56,7 +57,7 @@ function PrinterForm({printer,onClose,onSaved}){
     <div className="pm-modal" role="dialog" aria-modal="true" aria-label={editing?'Sửa máy in':'Thêm máy in'}>
       <header className="pm-head"><div><small>HEXA · QUẢN LÝ MÁY IN</small>
         <h3>{editing?'Chỉnh sửa máy in':'Thêm máy in mới'}</h3>
-        <p>Máy in tạo tại đây cũng xuất hiện trong Danh sách tài sản và có nhật ký riêng....</p>
+        <p>Máy in tạo tại đây cũng xuất hiện trong Danh sách tài sản và có nhật ký riêng.</p>
       </div><button className="pm-close" onClick={onClose} aria-label="Đóng"><X size={20}/></button></header>
       <div className="pm-content"><form className="pm-form" onSubmit={submit}>
         <div className="pm-form-grid">
@@ -225,6 +226,7 @@ export default function PrinterManagement({user,refreshEpoch=0}){
       <div className="pm-tabs" role="tablist" aria-label="Quản lý máy in và kho mực">
       <button id="pm-tab-printers" type="button" role="tab" aria-selected={tab==='printers'} aria-controls="pm-panel-printers" className={tab==='printers'?'active':''} onClick={()=>setTab('printers')}><Printer size={17}/> Danh sách máy in ({printers.length})</button>
       <button id="pm-tab-ink" type="button" role="tab" aria-selected={tab==='ink'} aria-controls="pm-panel-ink" className={tab==='ink'?'active':''} onClick={()=>setTab('ink')}><Package size={17}/> Mực trong kho</button>
+      <button id="pm-tab-activity" type="button" role="tab" aria-selected={tab==='activity'} aria-controls="pm-panel-activity" className={tab==='activity'?'active':''} onClick={()=>setTab('activity')}><History size={17}/> Lịch sử sửa chữa / Đổ mực</button>
     </div>
       <div className="pm-heading-actions">
         <button type="button" className="am-btn am-light" onClick={async()=>{setNotice('Đang làm mới dữ liệu...');const ok=await refresh();setRefreshId(x=>x+1);setNotice(ok?'Đã làm mới danh sách máy in và kho mực.':'Không thể làm mới danh sách máy in.')}} disabled={loading}>
@@ -232,7 +234,9 @@ export default function PrinterManagement({user,refreshEpoch=0}){
         </button>
         {tab==='printers'
           ? <button type="button" className="am-btn am-primary" onClick={()=>{setNotice('');setShowCreate(true);}}><Plus size={16}/> Thêm máy in</button>
-          : <button type="button" className="am-btn am-primary" onClick={()=>{setNotice('');setInkCreateSignal(x=>x+1);}}><Plus size={16}/> Thêm mực</button>}
+          : tab==='ink'
+            ? <button type="button" className="am-btn am-primary" onClick={()=>{setNotice('');setInkCreateSignal(x=>x+1);}}><Plus size={16}/> Thêm mực</button>
+            : null}
       </div>
     </div>
     {notice&&<p className="pm-message pm-ok"><CheckCircle2 size={16}/>{notice}</p>}
@@ -261,6 +265,9 @@ export default function PrinterManagement({user,refreshEpoch=0}){
       </section>
       <section id="pm-panel-ink" className="pm-tab-panel" role="tabpanel" aria-labelledby="pm-tab-ink" hidden={tab!=='ink'}>
         <WarehouseManagement kind="ink" embedded openCreateSignal={inkCreateSignal} refreshEpoch={refreshId+refreshEpoch}/>
+      </section>
+      <section id="pm-panel-activity" className="pm-tab-panel" role="tabpanel" aria-labelledby="pm-tab-activity" hidden={tab!=='activity'}>
+        <PrinterActivity active={tab==='activity'} refreshEpoch={refreshId+refreshEpoch}/>
       </section>
     </div>
     {selected&&<PrinterDetail printer={selected} onClose={()=>setSelected(null)} onSaved={refresh} user={user}/>} 

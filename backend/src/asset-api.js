@@ -7,6 +7,7 @@ import { readAssetExcel,writeAssetExcel } from './asset-excel.js';
 import { prepareExcelImport } from './asset-xlsx-import.js';
 import { quantity,stockChange } from './warehouse-core.js';
 import { isPrinterAsset, validatePrinterToner, normalizePrinterDetails } from './printer-core.js';
+import { listPrinterActivity } from './printer-activity.js';
 import { auditChanges, lowStockItems, assetReport, resolveStocktakeAsset, stocktakeProgress } from './asset-ops.js';
 import { collectInventoryBackup, zippedInventoryBackup } from './asset-backup.js';
 import { recordStockThreshold } from './stock-alerts.js';
@@ -223,6 +224,20 @@ router.post('/import.xlsx',requireManager,express.raw({type:['application/vnd.op
   catch(err){await Promise.all(reserved.map(key=>db.ref('assetCodeIndex/'+key).remove().catch(()=>{})));throw err;}
   res.json({created,skipped,categoriesCreated:plan.newCategories.length,departmentsCreated:plan.newDepartments.length,errors:[]});
 }));
+// Nhật ký tập trung cho tất cả máy in: chỉ đọc sự kiện đã lưu, không trừ kho lần nữa.
+// Đặt trước các route động /:id để tránh xung đột với đường dẫn API.
+router.get('/printers/activity',wrap(async(req,res)=>{
+  const [assets,maintenance,{cats,depts}]=await Promise.all([
+    obj('assets'),obj('assetMaintenance'),catalogs()
+  ]);
+  // Giữ lịch sử máy in đã đưa vào thùng rác để có thể tra cứu/audit.
+  const printers=Object.values(assets).map(item=>enrichAsset(item,cats,depts)).filter(isPrinterAsset);
+  const result=listPrinterActivity(printers,maintenance,{
+    kind:req.query.kind,search:req.query.search,page:req.query.page,pageSize:req.query.pageSize
+  });
+  res.json(result);
+}));
+
 // Printer fleet is a view over existing asset records; no duplicated device database.
 router.get('/printers',wrap(async(_req,res)=>{
   const [assets,{cats,depts}]=await Promise.all([obj('assets'),catalogs()]);
