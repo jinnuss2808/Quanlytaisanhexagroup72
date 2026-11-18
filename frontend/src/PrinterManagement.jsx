@@ -56,7 +56,7 @@ function PrinterForm({printer,onClose,onSaved}){
     <div className="pm-modal" role="dialog" aria-modal="true" aria-label={editing?'Sửa máy in':'Thêm máy in'}>
       <header className="pm-head"><div><small>HEXA · QUẢN LÝ MÁY IN</small>
         <h3>{editing?'Chỉnh sửa máy in':'Thêm máy in mới'}</h3>
-        <p>Máy in tạo tại đây cũng xuất hiện trong Danh sách tài sản và có nhật ký riêng..</p>
+        <p>Máy in tạo tại đây cũng xuất hiện trong Danh sách tài sản và có nhật ký riêng....</p>
       </div><button className="pm-close" onClick={onClose} aria-label="Đóng"><X size={20}/></button></header>
       <div className="pm-content"><form className="pm-form" onSubmit={submit}>
         <div className="pm-form-grid">
