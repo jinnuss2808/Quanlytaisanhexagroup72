@@ -5,3 +5,12 @@ service-account.json
 *firebase-admin*.json
 .git
 .hexa-deploy-backup
+
+!.env.example
+*service-account*.json
+firebase-adminsdk.json
+*.pem
+*.key
+.vercel
+*.7z
+*.zip

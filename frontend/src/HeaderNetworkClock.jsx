@@ -34,7 +34,7 @@ export default function HeaderNetworkClock() {
   const dateLong = now.toLocaleDateString('vi-VN', {day:'numeric', month:'long', year:'numeric'});
   const dateShort = now.toLocaleDateString('vi-VN', {day:'2-digit', month:'2-digit', year:'numeric'});
   const time = now.toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
-  const networkLabel = isOnline ? 'Có mạng' : 'Mất mạng';
+  const networkLabel = isOnline ? 'Có có mạng' : 'Mất mạng';
   const statusTitle = isOnline
     ? 'Trình duyệt báo đang có kết nối mạng (không bảo đảm Internet hoặc API hoạt động)'
     : 'Trình duyệt báo mất kết nối mạng';

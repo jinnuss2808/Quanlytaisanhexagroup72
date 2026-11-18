@@ -1,0 +1,22 @@
+# Never upload local private configuration in Vercel CLI source deployments
+.git
+.vercel
+**/.vercel
+**/.env
+**/.env.*
+!**/.env.example
+**/service-account.json
+**/*firebase-admin*.json
+**/*serviceAccountKey*.json
+**/*.pem
+**/*.p12
+**/*.pfx
+**/node_modules
+**/dist
+*.zip
+*.7z
+*.log
+patch
+payload
+toggle-payload
+.hexa-sort-backup

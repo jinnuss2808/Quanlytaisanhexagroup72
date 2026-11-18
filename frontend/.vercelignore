@@ -2,3 +2,13 @@ node_modules
 .env
 .env.*
 .git
+
+!.env.example
+service-account.json
+*service-account*.json
+firebase-adminsdk.json
+*.pem
+*.key
+.vercel
+*.7z
+*.zip
