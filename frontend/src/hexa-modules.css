@@ -175,3 +175,16 @@ html[data-hexa-theme="dark"] .hm-roster.hm-compact-directory .hm-scroll td{color
 html[data-hexa-theme="dark"] .hm-roster.hm-compact-directory .hm-scroll td:nth-child(2){color:#e3faf0}
 @media(max-width:1100px){.hm-roster.hm-compact-directory .hm-toolbar-search{flex:1 1 100%}.hm-roster.hm-compact-directory .hm-employee-sort-field{margin-right:auto}}
 @media(max-width:600px){.hm-roster.hm-compact-directory .hm-employee-sort-field{width:100%;justify-content:space-between}.hm-roster.hm-compact-directory .hm-employee-sort-field select{width:70%}}
+
+/* HEXA_MODULES_DENSE_CSS_20261119_V1: compact Attendance & Link mail safely */
+.hm-compact-directory{gap:8px!important}
+.hm-compact-directory .hm-compact-toolbar{gap:7px!important}
+.hm-compact-directory .hm-toolbar-search{min-height:34px!important}
+.hm-compact-directory .hm-toolbar-search input{min-height:32px!important}
+.hm-compact-directory .hm-btn-tight{min-height:33px!important;padding:6px 9px!important}
+.hm-compact-directory .hm-panel.hm-directory-panel{border-radius:10px}
+.hm-compact-directory .hm-scroll th{padding:10px 9px!important}
+.hm-compact-directory .hm-scroll td{padding:8px 9px!important}
+.hm-roster.hm-compact-directory .hm-roster-scroll{max-height:calc(100dvh - 155px)!important}
+.hm-mail-v2.hm-compact-directory .hm-mail-table-scroll{max-height:calc(100dvh - 155px)!important}
+@media(max-width:650px){.hm-compact-directory .hm-compact-toolbar{align-items:stretch}}

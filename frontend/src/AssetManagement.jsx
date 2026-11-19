@@ -279,11 +279,23 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   const [filters,setFilters]=useState({search:'',categoryId:'',ownerDepartmentId:'',status:'',page:1,pageSize:20});
   const [searchValue,setSearchValue]=useState(''),[editing,setEditing]=useState(undefined),[assigning,setAssigning]=useState(null),[detail,setDetail]=useState(null);
   const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[warehouseRefreshEpoch,setWarehouseRefreshEpoch]=useState(0);
+  /* HEXA_INLINE_ASSET_STATS_20261119_V2: number of inventory SKUs, not sum of mixed units. */
+  const [hexaWarehouseSkuCount, hexaSetWarehouseSkuCount] = useState(null);
+  const hexaRefreshWarehouseCount = useCallback(async () => {
+    try {
+      const result = await api('/warehouse');
+      const count = Number.isFinite(result?.total) ? result.total : Array.isArray(result?.items) ? result.items.length : null;
+      hexaSetWarehouseSkuCount(count);
+    } catch { hexaSetWarehouseSkuCount(null); }
+  }, []);
+  useEffect(() => { hexaRefreshWarehouseCount(); }, [hexaRefreshWarehouseCount,mode,warehouseRefreshEpoch]);
   const isManager=user.role==='manager';
   const hexaTabStorageKey = 'hexa.asset.hiddenTabs.v1:' + (user?.uid || user?.email || 'local');
   const [hexaHiddenTabs, hexaSetHiddenTabs] = useState(() => hexaReadHiddenAssetTabs(hexaTabStorageKey));
   const [hexaTabMenuOpen, hexaSetTabMenuOpen] = useState(false);
   const hexaTabMenuRef = useRef(null);
+  const [hexaExtraMenuOpen, hexaSetExtraMenuOpen] = useState(false);
+  const hexaExtraMenuRef = useRef(null);
   useEffect(() => {
     hexaSetHiddenTabs(hexaReadHiddenAssetTabs(hexaTabStorageKey));
   }, [hexaTabStorageKey]);
@@ -298,8 +310,16 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
     document.addEventListener('keydown', onKey);
     return () => {document.removeEventListener('pointerdown', onPointer); document.removeEventListener('keydown', onKey);};
   }, [hexaTabMenuOpen]);
+  useEffect(() => {
+    if (!hexaExtraMenuOpen) return;
+    const onPointer = event => { if (!hexaExtraMenuRef.current?.contains(event.target)) hexaSetExtraMenuOpen(false); };
+    const onKey = event => { if (event.key === 'Escape') hexaSetExtraMenuOpen(false); };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onPointer); document.removeEventListener('keydown', onKey); };
+  }, [hexaExtraMenuOpen]);
   const hexaToggleTab = id => {
-    if (id === 'assets') return; // Không ẩn mục chính để luôn có nơi quay về.
+    if (['assets','warehouse','printers','trash'].includes(id)) return; // Không ẩn mục chính để luôn có nơi quay về.
     hexaSetHiddenTabs(previous => previous.includes(id) ? previous.filter(x => x !== id) : [...previous, id]);
     if (mode === id && !hexaHiddenTabs.includes(id)) setMode('assets');
   };
@@ -316,28 +336,49 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   useEffect(()=>{const timer=setTimeout(()=>setFilters(f=>({...f,search:searchValue,page:1})),300);return()=>clearTimeout(timer);},[searchValue]);
   useEffect(()=>{if(mode==='assets'||mode==='trash')load();},[mode,load]);
   useEffect(()=>{if(mode!=='assets'&&mode!=='trash')return;const interval=setInterval(()=>load(),60000);return()=>clearInterval(interval);},[load,mode]);
-  const refresh=async()=>{await Promise.all([load(),reloadCatalogs()]);setNotice('Dữ liệu đã được cập nhật.');};
+  const refresh=async()=>{await Promise.all([load(),reloadCatalogs(),hexaRefreshWarehouseCount()]);setNotice('Dữ liệu đã được cập nhật.');};
   const saved=async()=>{setEditing(undefined);setAssigning(null);setDetail(null);setWarehouseRefreshEpoch(n=>n+1);await refresh();};
   const remove=async item=>{if(!window.confirm(`Chuyển ${item.assetCode} vào thùng rác?`))return;try{await api(`/assets/${item.id}`,{method:'DELETE'});await refresh();}catch(err){setError(err.message);}};
   const restore=async item=>{try{await api(`/assets/${item.id}/restore`,{method:'POST'});await refresh();}catch(err){setError(err.message);}};
   const xlsx=async()=>{try{download(await rawRequest('/assets/export.xlsx',{blob:true}),`DanhSachTaiSan_HEXA_${new Date().toISOString().slice(0,10)}.xlsx`);}catch(err){setError(err.message);}};
   useEffect(()=>{if(initialTicket){setMode('assets');setEditing({...initialAsset,assetName:initialTicket.itemName||initialTicket.subject,description:`Tham chiếu yêu cầu ${initialTicket.code||initialTicket.id}`});onClearInitialTicket();}},[initialTicket,onClearInitialTicket]);
-  const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['printers','Quản lý máy in',Wrench],['stock','Kho linh kiện',HardDrive],['stocktake','Kiểm kê QR',QrCode],['reports','Báo cáo tài sản',Building2],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload],['backups','Sao lưu',Download]]:[])];
-  const hexaVisibleModes = modes.filter(([id]) => id === 'assets' || !hexaHiddenTabs.includes(id));
+  /* HEXA_ASSET_DENSE_NAV_20261119_V1: reorganize navigation only; keep all asset data and operations. */
+  const modes=[['assets','Danh sách tài sản',Boxes],['warehouse','Kho thiết bị',PackageSearch],['printers','Quản lý máy in',Wrench],['stock','Kho linh kiện',HardDrive],['reports','Báo cáo tài sản',Building2],['trash','Thùng rác',Trash2],...(isManager?[['catalogs','Danh mục',Tags],['import','Nhập dữ liệu',Upload],['backups','Sao lưu',Download]]:[])];
+  const hexaPrimaryModes = modes.filter(([id]) => ['assets','warehouse','printers'].includes(id));
+  const hexaOptionalModes = modes.filter(([id]) => !['assets','warehouse','printers','trash'].includes(id));
+  const hexaExtraModes = hexaOptionalModes.filter(([id]) => !hexaHiddenTabs.includes(id));
+  const hexaSelectMode = id => {
+    setError(''); setNotice(''); setMode(id);
+    setFilters(f => ({...f,page:1}));
+    hexaSetExtraMenuOpen(false); hexaSetTabMenuOpen(false);
+  };
   return <div className="am-root">
-    <div className="am-stats">{[[Boxes,'Tổng tài sản',stats.total], [CheckCircle2,'Có sẵn',stats.available],[Laptop,'Đang sử dụng',stats.using],[Wrench,'Bảo trì',stats.maintenance],[AlertTriangle,'Đã hỏng',stats.broken]].map(([Icon,label,value])=><div key={label} className="am-stat"><div className="am-stat-icon"><Icon size={18}/></div><span>{label}</span><strong>{value}</strong></div>)}</div>
 
-    <div className="am-tabs-toolbar">
-      <div className="am-pill-tabs am-main-tabs" role="tablist" aria-label="Các phân hệ quản lý tài sản">
-        {hexaVisibleModes.map(([id,label,Icon])=><button key={id} type="button" role="tab" aria-selected={mode===id} className={mode===id?'active':''} onClick={()=>{setError('');setNotice('');setMode(id);setFilters(f=>({...f,page:1}));}}><Icon size={15}/>{label}</button>)}
+    <div className="am-tabs-toolbar am-tabs-with-stats">
+      <div className="am-pill-tabs am-main-tabs" role="tablist" aria-label="Phân hệ thường dùng">
+        {hexaPrimaryModes.map(([id,label,Icon])=><button key={id} type="button" role="tab" aria-selected={mode===id} className={mode===id?'active':''} onClick={()=>hexaSelectMode(id)}><Icon size={15}/>{label}</button>)}
       </div>
-      <div className="am-tab-settings" ref={hexaTabMenuRef}>
-        <button type="button" className="am-tab-settings-trigger" aria-expanded={hexaTabMenuOpen} aria-controls="hexa-tab-visibility-panel" onClick={()=>hexaSetTabMenuOpen(open=>!open)}><LayoutGrid size={16}/> Ẩn/hiện mục</button>
-        {hexaTabMenuOpen&&<div className="am-tab-visibility-panel" id="hexa-tab-visibility-panel" role="group" aria-label="Tùy chỉnh các mục hiển thị">
-          <div className="am-tab-visibility-head"><strong>Chọn mục cần hiển thị</strong><button type="button" onClick={()=>hexaSetTabMenuOpen(false)} aria-label="Đóng"><X size={16}/></button></div>
-          {modes.map(([id,label,Icon])=><label className="am-tab-visibility-option" key={id}><input type="checkbox" checked={id==='assets'||!hexaHiddenTabs.includes(id)} disabled={id==='assets'} onChange={()=>hexaToggleTab(id)}/><Icon size={15}/><span>{label}</span>{id==='assets'&&<small>Cố định</small>}</label>)}
-          <button type="button" className="am-tab-visibility-reset" onClick={()=>hexaSetHiddenTabs([])}>Hiện tất cả mục</button>
-        </div>}
+      <div className="am-inline-stats" aria-label="Thống kê tài sản và kho">
+        <div className="am-inline-stat" title="Tổng số tài sản" aria-label={`Tổng tài sản: ${stats.total}`}><Boxes size={13}/><span>Tổng TS</span><strong>{stats.total}</strong></div>
+        <div className="am-inline-stat" title="Số tài sản đang có sẵn" aria-label={`Có sẵn: ${stats.available}`}><CheckCircle2 size={13}/><span>Có sẵn</span><strong>{stats.available}</strong></div>
+        <div className="am-inline-stat" title="Số mã vật tư đang quản lý trong kho (không cộng các đơn vị khác nhau)" aria-label={`Tổng kho: ${hexaWarehouseSkuCount ?? 'chưa tải'}`}><PackageSearch size={13}/><span>Tổng kho</span><strong>{hexaWarehouseSkuCount ?? '—'}</strong></div>
+      </div>
+      <div className="am-tab-menu-actions">
+        <div className="am-more-wrapper" ref={hexaExtraMenuRef}>
+          <button type="button" className={'am-more-trigger'+(hexaExtraModes.some(([id])=>id===mode)?' active':'')} aria-expanded={hexaExtraMenuOpen} aria-controls="hexa-extra-tab-list" onClick={()=>{hexaSetExtraMenuOpen(open=>!open);hexaSetTabMenuOpen(false);}}><LayoutGrid size={15}/> Thêm <ChevronRight className="am-more-caret" size={13}/></button>
+          {hexaExtraMenuOpen&&<div className="am-extra-dropdown" id="hexa-extra-tab-list" role="menu" aria-label="Các mục phụ">
+            {hexaExtraModes.length?hexaExtraModes.map(([id,label,Icon])=><button type="button" role="menuitem" key={id} className={mode===id?'active':''} onClick={()=>hexaSelectMode(id)}><Icon size={15}/>{label}</button>):<p>Chưa bật mục phụ. Chọn “Tùy chọn” để bật.</p>}
+          </div>}
+        </div>
+        <button type="button" title="Thùng rác" aria-label="Thùng rác" className={'am-trash-shortcut'+(mode==='trash'?' active':'')} onClick={()=>hexaSelectMode('trash')}><Trash2 size={17}/></button>
+        <div className="am-tab-settings" ref={hexaTabMenuRef}>
+          <button type="button" className="am-tab-settings-trigger" title="Ẩn hoặc hiện các mục phụ" aria-label="Ẩn hoặc hiện các mục phụ" aria-expanded={hexaTabMenuOpen} aria-controls="hexa-tab-visibility-panel" onClick={()=>{hexaSetTabMenuOpen(open=>!open);hexaSetExtraMenuOpen(false);}}><LayoutGrid size={15}/><span>Tùy chọn</span></button>
+          {hexaTabMenuOpen&&<div className="am-tab-visibility-panel" id="hexa-tab-visibility-panel" role="group" aria-label="Tùy chỉnh các mục phụ">
+            <div className="am-tab-visibility-head"><strong>Hiển thị trong “Thêm”</strong><button type="button" onClick={()=>hexaSetTabMenuOpen(false)} aria-label="Đóng"><X size={16}/></button></div>
+            {hexaOptionalModes.map(([id,label,Icon])=><label className="am-tab-visibility-option" key={id}><input type="checkbox" checked={!hexaHiddenTabs.includes(id)} onChange={()=>hexaToggleTab(id)}/><Icon size={15}/><span>{label}</span></label>)}
+            <button type="button" className="am-tab-visibility-reset" onClick={()=>hexaSetHiddenTabs([])}>Hiện tất cả mục phụ</button>
+          </div>}
+        </div>
       </div>
     </div>
     {error&&<div className="am-error am-banner">{error}<button onClick={()=>setError('')} aria-label="Đóng lỗi"><X size={15}/></button></div>}

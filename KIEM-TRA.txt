@@ -1,0 +1,7 @@
+Checked against HEXA frontend AssetManagement.jsx and CSS from the most recent complete source archive available in this conversation.
+- node --check on patcher: PASS
+- React JSX parsed with TypeScript JSX transpiler: PASS
+- First application and repeated application: PASS, no duplicate markers
+- Menu: 3 main items, More dropdown, trash icon, optional tabs list with no stocktake QR: PASS (static)
+- Card summary: 3 cards, no Maintenance/Broken summary: PASS (static)
+- Firebase/production UI: NOT TESTED
