@@ -1,4 +1,6 @@
 import itLibraryRouter from './it-library-api.js';
+import { attendanceAdminRouter, attendanceSelfRouter } from './attendance-api.js';
+import mailVaultRouter from './mail-vault-api.js';
 // HEXA_IT_LIBRARY_V1
 import express from 'express';
 import assetRouter, { publicAssetHandler } from './asset-api.js';
@@ -131,6 +133,9 @@ app.get('/api/public/assets/:publicId', publicAssetHandler);
 app.use('/api/assets', requireIT, assetRouter);
 app.use('/api/warehouse', requireIT, warehouseRouter);
 app.use('/api/it-library', requireIT, itLibraryRouter);
+app.use('/api/attendance/admin', requireIT, requireManager, attendanceAdminRouter);
+app.use('/api/attendance/self', attendanceSelfRouter);
+app.use('/api/mail-links', requireIT, requireManager, mailVaultRouter);
 // OFF by default. This setting is persisted in Realtime Database only by a manager.
 app.get('/api/public/settings', asyncRoute(async (_req, res) => {
   res.json({ requesterWorkflowEnabled: await readWorkflow(), ticketEnabled: await readTicketEnabled() });

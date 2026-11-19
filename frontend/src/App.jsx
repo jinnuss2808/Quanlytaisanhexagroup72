@@ -16,6 +16,9 @@ import { api } from './api';
 import { filterTicketsByType, countTicketsByType } from './ticket-list';
 import AssetManagement, { PublicAssetPage } from './AssetManagement';
 import HeaderNetworkClock from './HeaderNetworkClock.jsx';
+import AttendanceManagement from './AttendanceManagement.jsx';
+import AttendanceClock from './AttendanceClock.jsx';
+import MailLinks from './MailLinks.jsx';
 // HEXA_IT_LIBRARY_V1
 
 const STATUS = {
@@ -447,6 +450,7 @@ function Dashboard({ user, onLogout }) {
       { id: 'tickets', label: 'Quản lý ticket', icon: Ticket, count: tickets.filter(t => t.status === 'new').length },
     ] : []),
     { id: 'assets', label: 'Quản lý tài sản', icon: Boxes },
+    ...(isManager ? [{ id: 'attendance', label: 'Chấm công', icon: CalendarDays }, { id: 'mail_links', label: 'Link mail', icon: Mail }] : []),
     ...(ticketEnabled ? [
       { id: 'reports', label: 'Thống kê hoàn thành', icon: BarChart3 },
       { id: 'notifications', label: 'Thông báo', icon: Bell, count: unread }
@@ -456,7 +460,7 @@ function Dashboard({ user, onLogout }) {
     ...(ticketEnabled ? [{ id: 'requester_accounts', label: 'Tài khoản người yêu cầu', icon: UserRoundPlus }] : []),
     { id: 'settings', label: 'Cấu hình hệ thống', icon: SlidersHorizontal });
   else if (ticketEnabled) items.push({ id: 'leaves', label: 'Ngày nghỉ của tôi', icon: CalendarOff });
-  const title = { overview: 'Tổng quan hệ thống', tickets: 'Quản lý ticket', equipment: 'Yêu cầu trang thiết bị', notifications: 'Thông báo của bạn', users: 'Quản lý nhân viên IT', reports: 'Báo cáo hoàn thành', leaves: 'Đăng ký ngày nghỉ', requester_accounts: 'Tài khoản người yêu cầu', settings: 'Cấu hình hệ thống', assets: 'Quản lý tài sản' }[section];
+  const title = { overview: 'Tổng quan hệ thống', tickets: 'Quản lý ticket', equipment: 'Yêu cầu trang thiết bị', notifications: 'Thông báo của bạn', users: 'Quản lý nhân viên IT', reports: 'Báo cáo hoàn thành', leaves: 'Đăng ký ngày nghỉ', requester_accounts: 'Tài khoản người yêu cầu', settings: 'Cấu hình hệ thống', assets: 'Quản lý tài sản', attendance:'Chấm công', mail_links:'Link mail' }[section];
   const ticketCounts = useMemo(() => ({
     support: countTicketsByType(tickets, 'support'),
     equipment: countTicketsByType(tickets, 'equipment'),
@@ -518,6 +522,8 @@ function Dashboard({ user, onLogout }) {
               <TicketTable tickets={filteredTickets} onOpen={openTicket}/>
             </div>
           </div>}
+          {section === 'attendance' && isManager && <AttendanceManagement/>}
+          {section === 'mail_links' && isManager && <MailLinks/>}
           {section === 'assets' && <AssetManagement user={user} initialTicket={assetFromTicket} onClearInitialTicket={() => setAssetFromTicket(null)}/>}
           {section === 'reports' && <CompletionReport user={user}/>}
           {section === 'leaves' && !isManager && <LeavePlanner/>}
@@ -1066,6 +1072,7 @@ function CompletionReport({ user }) {
 }
 
 export default function App() {
+  const isAttendance = window.location.pathname === '/attendance' || window.location.pathname === '/attendance/';
   const isIT = window.location.pathname === '/it' || window.location.pathname.startsWith('/it/');
   const assetPublicId = window.location.pathname.match(/^\/assets\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
   const [firebaseUser, setFirebaseUser] = useState(undefined);
@@ -1080,6 +1087,7 @@ export default function App() {
     return () => { alive = false; };
   }, [firebaseUser, isIT]);
   if (assetPublicId) return <PublicAssetPage publicId={assetPublicId}/>;
+  if (isAttendance) return <AttendanceClock/>;
   if (!isIT) return <PublicPage/>;
   if (firebaseUser === undefined) return <Spinner/>;
   if (!firebaseUser) return <><LoginPage/>{authError && <div className="auth-toast">{authError}</div>}</>;
