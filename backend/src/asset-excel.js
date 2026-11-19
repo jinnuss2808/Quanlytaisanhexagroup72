@@ -55,7 +55,7 @@ function zipRead(bytes){
 }
 const attr=(text,key)=>{const found=String(text).match(new RegExp(`(?:^|\\s)${key}="([^"]*)"`));return found?decoder(found[1]):'';};
 const columnIndex=letters=>[...letters].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
-function textNodes(xml){return [...String(xml).matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(x=>decoder(x[1])).join('');}
+function textNodes(xml){return [...String(xml).matchAll(/<(?:[A-Za-z][\w-]*:)?t(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z][\w-]*:)?t>/g)].map(x=>decoder(x[1])).join('');}
 function sheetName(files){
   const workbook=files.get('xl/workbook.xml')||'';
   const first=[...workbook.matchAll(/<sheet\b([^>]*?)\/?\s*>/g)];
@@ -70,22 +70,23 @@ function sheetName(files){
   if(/^worksheets\/sheet\d+\.xml$/.test(target))return 'xl/'+target;
   return 'xl/worksheets/sheet1.xml';
 }
-export function readAssetExcel(buffer){
+export function readExcelTable(buffer,expectedHeaders=EXCEL_HEADERS,{maxRows=MAX_ROWS}={}){
+  if(!Array.isArray(expectedHeaders)||expectedHeaders.length<1||expectedHeaders.length>26) throw assetError(400,'Danh sách cột Excel không hợp lệ.');
   const files=zipRead(buffer);
   const xml=files.get(sheetName(files));
-  if(!xml)throw assetError(400,'Không tìm thấy sheet Assets trong Excel.');
-  const strings=[...(files.get('xl/sharedStrings.xml')||'').matchAll(/<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g)].map(x=>textNodes(x[1]));
+  if(!xml)throw assetError(400,'Không tìm thấy sheet dữ liệu trong Excel.');
+  const strings=[...(files.get('xl/sharedStrings.xml')||'').matchAll(/<(?:[A-Za-z][\w-]*:)?si(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z][\w-]*:)?si>/g)].map(x=>textNodes(x[1]));
   const out=[];
-  for(const match of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)){
+  for(const match of xml.matchAll(/<(?:[A-Za-z][\w-]*:)?row\b([^>]*)>([\s\S]*?)<\/(?:[A-Za-z][\w-]*:)?row>/g)){
     const number=Number(attr(match[1],'r'))||out.length+1;
-    if(number>MAX_ROWS+1)throw assetError(400,'Excel tối đa 5.000 dòng dữ liệu.');
-    const values=Array(8).fill('');
-    for(const cell of match[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+    if(number>maxRows+1)throw assetError(400,`Excel tối đa ${maxRows} dòng dữ liệu.`);
+    const values=Array(expectedHeaders.length).fill('');
+    for(const cell of match[2].matchAll(/<(?:[A-Za-z][\w-]*:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z][\w-]*:)?c>)/g)){
       const ref=attr(cell[1],'r').match(/^([A-Z]+)\d+$/i);
       if(!ref)continue;
-      const col=columnIndex(ref[1].toUpperCase());if(col<0||col>7)continue;
+      const col=columnIndex(ref[1].toUpperCase());if(col<0||col>=expectedHeaders.length)continue;
       const type=attr(cell[1],'t');const body=cell[2]||'';
-      const cached=(body.match(/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/)||[])[1];
+      const cached=(body.match(/<(?:[A-Za-z][\w-]*:)?v(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z][\w-]*:)?v>/)||[])[1];
       let value=type==='inlineStr'?textNodes(body):type==='s'?strings[Number(cached)]??'':cached===undefined?'':decoder(cached);
       if(type==='b')value=value==='1'?'TRUE':'FALSE';
       values[col]=value;
@@ -94,10 +95,12 @@ export function readAssetExcel(buffer){
     if(values.some(v=>String(v).trim()))out.push({row:number,values});
   }
   const header=out[0];
-  if(!Array.isArray(header)||header.some((v,i)=>String(v).trim().toLocaleLowerCase('vi')!==EXCEL_HEADERS[i].toLocaleLowerCase('vi')))
-    throw assetError(400,`Sheet Assets phải có 8 cột theo mẫu: ${EXCEL_HEADERS.join(' | ')}.`);
+  const canonHeader = x => String(x??'').trim().toLowerCase().replace(/đ/g,'d').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  if(!Array.isArray(header)||header.some((v,i)=>{const options=Array.isArray(expectedHeaders[i])?expectedHeaders[i]:[expectedHeaders[i]];return !options.some(x=>canonHeader(x)===canonHeader(v));}))
+    throw assetError(400,`Excel phải có 5/8 cột đúng thứ tự tiêu đề theo mẫu: ${expectedHeaders.map(x=>Array.isArray(x)?x[0]:x).join(' | ')}.`);
   return out.slice(1);
 }
+export function readAssetExcel(buffer){ return readExcelTable(buffer,EXCEL_HEADERS); }
 function zipWrite(entries){
   const locals=[],centrals=[];let offset=0;
   for(const [name,data] of entries){
