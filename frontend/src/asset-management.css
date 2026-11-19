@@ -591,3 +591,58 @@ html[data-hexa-theme="dark"] .am-root .am-inline-stat svg{color:#7bd5b9!importan
  .am-root .am-tab-stage{height:clamp(480px,calc(100dvh - 190px),1100px)!important}
 }
 
+
+/* HEXA_ONE_MORE_MENU_TABLE_CSS_20261119_V1 - merged menu + readable table */
+/* Menu is one popover, with a collapsed visibility section. */
+.am-root .am-tabs-with-stats .am-tab-menu-actions{gap:5px!important}
+.am-root .am-extra-dropdown.am-more-unified{width:258px;min-width:238px;max-width:min(290px,calc(100vw - 28px));padding:7px!important;overflow-y:auto;max-height:min(65dvh,450px)}
+.am-root .am-more-section-title{font-size:10px;letter-spacing:.035em;font-weight:800;color:#60887e;padding:6px 9px 4px}
+.am-root .am-more-divider{height:1px;background:#e4efeb;margin:7px 4px}
+.am-root .am-more-unified .am-more-customize-trigger{width:100%;display:flex;align-items:center;gap:8px;font-weight:750;text-align:left}
+.am-root .am-more-unified .am-more-customize-caret{margin-left:auto;transform:rotate(90deg);transition:transform .15s}
+.am-root .am-more-unified .am-more-customize-caret.expanded{transform:rotate(-90deg)}
+.am-root .am-more-visibility{display:grid;gap:3px;border:1px solid #e3f0ec;border-radius:8px;padding:7px;background:#f7fcfa;margin-top:5px}
+.am-root .am-more-visibility-item{display:flex;align-items:center;gap:9px;padding:6px 8px;min-height:31px;border-radius:6px;font-size:11px;font-weight:600;color:#35675e;cursor:pointer}
+.am-root .am-more-visibility-item:hover{background:#e7f6f1}
+.am-root .am-more-visibility-item input{width:15px;height:15px;min-width:15px;accent-color:#076b5d;margin:0}
+.am-root .am-more-unified .am-more-show-all{font-size:10px;font-weight:800;justify-content:center;border:1px solid #d8ece6;background:#fff;margin-top:3px;min-height:30px}
+/* Restore legibility while preserving a high row count. */
+.am-root .am-asset-list-card .am-assets-table{width:100%!important;min-width:795px!important;table-layout:fixed!important}
+.am-root .am-asset-list-card .am-assets-table th:nth-child(1){width:13%!important}
+.am-root .am-asset-list-card .am-assets-table th:nth-child(2){width:21%!important}
+.am-root .am-asset-list-card .am-assets-table th:nth-child(3){width:10%!important}
+.am-root .am-asset-list-card .am-assets-table th:nth-child(4){width:12%!important}
+.am-root .am-asset-list-card .am-assets-table th:nth-child(5){width:13%!important}
+.am-root .am-asset-list-card .am-assets-table th:nth-child(6){width:11%!important}
+.am-root .am-asset-list-card .am-assets-table th:nth-child(7){width:20%!important}
+.am-root .am-asset-list-card .am-assets-table th{padding:9px 6px!important;font-size:10.5px!important;line-height:1.25!important;color:#5a7e76!important}
+.am-root .am-asset-list-card .am-assets-table td{padding:7px 6px!important;font-size:12.75px!important;line-height:1.4!important;color:#355f58!important;vertical-align:middle}
+.am-root .am-asset-list-card .am-assets-table td b{font-size:12.75px!important;line-height:1.35!important;color:#184f47!important}
+.am-root .am-asset-list-card .am-assets-table td small{font-size:10.75px!important;line-height:1.3!important;margin-top:3px!important;color:#648a80!important}
+.am-root .am-asset-list-card .am-assets-table td:first-child .am-link{display:block;max-width:100%;margin:0;font-size:11.75px!important;line-height:1.35!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.am-root .am-asset-list-card .am-assets-table .am-status{font-size:10px!important;line-height:1.25!important;padding:5px 6px!important;max-width:100%;white-space:normal}
+.am-root .am-asset-list-card .am-assets-table .am-row-actions{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:3px;max-width:100%;min-width:0}
+.am-root .am-asset-list-card .am-assets-table .am-row-actions button{box-sizing:border-box;flex:0 0 26px!important;width:26px!important;height:27px!important;padding:4px!important}
+.am-root .am-asset-list-card .am-assets-table tbody tr:nth-child(even){background:#f7fbfa}
+.am-root .am-asset-list-card .am-assets-table tbody tr:hover{background:#eaf7f2!important}
+.am-root .am-assets-table button:focus-visible,.am-root .am-more-trigger:focus-visible,.am-root .am-more-unified button:focus-visible,.am-root .am-more-visibility-item:focus-within{outline:2px solid #0b806f;outline-offset:2px}
+/* Keep search and table headers in place while scrolling within the list. */
+.am-root .am-asset-list-card > .am-table-wrap{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.am-root .am-asset-list-card .am-assets-table thead th{position:sticky;top:0;z-index:2}
+html[data-hexa-theme="dark"] .am-root .am-more-section-title{color:#a9cfc1}
+html[data-hexa-theme="dark"] .am-root .am-more-divider{background:#3f6256}
+html[data-hexa-theme="dark"] .am-root .am-more-visibility{background:#1c332b;border-color:#416458}
+html[data-hexa-theme="dark"] .am-root .am-more-visibility-item{color:#d0e7db}
+html[data-hexa-theme="dark"] .am-root .am-more-visibility-item:hover{background:#305449}
+html[data-hexa-theme="dark"] .am-root .am-more-unified .am-more-show-all{background:#29483d;border-color:#476c60;color:#e0f4eb}
+html[data-hexa-theme="dark"] .am-root .am-asset-list-card .am-assets-table tbody tr:nth-child(even){background:#1b322b}
+html[data-hexa-theme="dark"] .am-root .am-asset-list-card .am-assets-table tbody tr:hover{background:#29473c!important}
+html[data-hexa-theme="dark"] .am-root .am-asset-list-card .am-assets-table td{color:#bcdad0!important}
+html[data-hexa-theme="dark"] .am-root .am-asset-list-card .am-assets-table td b{color:#e1f2ea!important}
+html[data-hexa-theme="dark"] .am-root .am-asset-list-card .am-assets-table td small{color:#a0c6b8!important}
+html[data-hexa-theme="dark"] .am-root .am-asset-list-card .am-assets-table th{color:#b0d5c7!important}
+@media(max-width:850px){
+ .am-root .am-asset-list-card .am-assets-table{min-width:795px!important}
+ .am-root .am-extra-dropdown.am-more-unified{right:0}
+}
+

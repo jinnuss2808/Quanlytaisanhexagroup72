@@ -293,7 +293,6 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   const hexaTabStorageKey = 'hexa.asset.hiddenTabs.v1:' + (user?.uid || user?.email || 'local');
   const [hexaHiddenTabs, hexaSetHiddenTabs] = useState(() => hexaReadHiddenAssetTabs(hexaTabStorageKey));
   const [hexaTabMenuOpen, hexaSetTabMenuOpen] = useState(false);
-  const hexaTabMenuRef = useRef(null);
   const [hexaExtraMenuOpen, hexaSetExtraMenuOpen] = useState(false);
   const hexaExtraMenuRef = useRef(null);
   useEffect(() => {
@@ -302,14 +301,6 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   useEffect(() => {
     try { window.localStorage.setItem(hexaTabStorageKey, JSON.stringify(hexaHiddenTabs)); } catch {}
   }, [hexaTabStorageKey, hexaHiddenTabs]);
-  useEffect(() => {
-    if (!hexaTabMenuOpen) return;
-    const onPointer = event => {if (!hexaTabMenuRef.current?.contains(event.target)) hexaSetTabMenuOpen(false);};
-    const onKey = event => {if (event.key === 'Escape') hexaSetTabMenuOpen(false);};
-    document.addEventListener('pointerdown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {document.removeEventListener('pointerdown', onPointer); document.removeEventListener('keydown', onKey);};
-  }, [hexaTabMenuOpen]);
   useEffect(() => {
     if (!hexaExtraMenuOpen) return;
     const onPointer = event => { if (!hexaExtraMenuRef.current?.contains(event.target)) hexaSetExtraMenuOpen(false); };
@@ -364,21 +355,21 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
         <div className="am-inline-stat" title="Số mã vật tư đang quản lý trong kho (không cộng các đơn vị khác nhau)" aria-label={`Tổng kho: ${hexaWarehouseSkuCount ?? 'chưa tải'}`}><PackageSearch size={13}/><span>Tổng kho</span><strong>{hexaWarehouseSkuCount ?? '—'}</strong></div>
       </div>
       <div className="am-tab-menu-actions">
+        {/* HEXA_ONE_MORE_MENU_READABLE_TABLE_20261119_V1: keep all secondary modules and visibility controls in one menu. */}
         <div className="am-more-wrapper" ref={hexaExtraMenuRef}>
           <button type="button" className={'am-more-trigger'+(hexaExtraModes.some(([id])=>id===mode)?' active':'')} aria-expanded={hexaExtraMenuOpen} aria-controls="hexa-extra-tab-list" onClick={()=>{hexaSetExtraMenuOpen(open=>!open);hexaSetTabMenuOpen(false);}}><LayoutGrid size={15}/> Thêm <ChevronRight className="am-more-caret" size={13}/></button>
-          {hexaExtraMenuOpen&&<div className="am-extra-dropdown" id="hexa-extra-tab-list" role="menu" aria-label="Các mục phụ">
-            {hexaExtraModes.length?hexaExtraModes.map(([id,label,Icon])=><button type="button" role="menuitem" key={id} className={mode===id?'active':''} onClick={()=>hexaSelectMode(id)}><Icon size={15}/>{label}</button>):<p>Chưa bật mục phụ. Chọn “Tùy chọn” để bật.</p>}
+          {hexaExtraMenuOpen&&<div className="am-extra-dropdown am-more-unified" id="hexa-extra-tab-list" role="group" aria-label="Điều hướng và tùy chỉnh mục phụ">
+            <div className="am-more-section-title">Công cụ khác</div>
+            {hexaExtraModes.length?hexaExtraModes.map(([id,label,Icon])=><button type="button" key={id} className={mode===id?'active':''} onClick={()=>hexaSelectMode(id)}><Icon size={15}/>{label}</button>):<p>Chưa có mục phụ đang bật.</p>}
+            <div className="am-more-divider"/>
+            <button type="button" className="am-more-customize-trigger" aria-expanded={hexaTabMenuOpen} aria-controls="hexa-more-visibility" onClick={()=>hexaSetTabMenuOpen(open=>!open)}><LayoutGrid size={15}/> Hiện / ẩn mục <ChevronRight size={13} className={'am-more-customize-caret'+(hexaTabMenuOpen?' expanded':'')}/></button>
+            {hexaTabMenuOpen&&<div className="am-more-visibility" id="hexa-more-visibility" role="group" aria-label="Chọn các công cụ trong menu Thêm">
+              {hexaOptionalModes.map(([id,label,Icon])=><label key={id} className="am-more-visibility-item"><input type="checkbox" checked={!hexaHiddenTabs.includes(id)} onChange={()=>hexaToggleTab(id)}/><Icon size={15}/><span>{label}</span></label>)}
+              <button type="button" className="am-more-show-all" onClick={()=>hexaSetHiddenTabs([])}>Hiện tất cả</button>
+            </div>}
           </div>}
         </div>
         <button type="button" title="Thùng rác" aria-label="Thùng rác" className={'am-trash-shortcut'+(mode==='trash'?' active':'')} onClick={()=>hexaSelectMode('trash')}><Trash2 size={17}/></button>
-        <div className="am-tab-settings" ref={hexaTabMenuRef}>
-          <button type="button" className="am-tab-settings-trigger" title="Ẩn hoặc hiện các mục phụ" aria-label="Ẩn hoặc hiện các mục phụ" aria-expanded={hexaTabMenuOpen} aria-controls="hexa-tab-visibility-panel" onClick={()=>{hexaSetTabMenuOpen(open=>!open);hexaSetExtraMenuOpen(false);}}><LayoutGrid size={15}/><span>Tùy chọn</span></button>
-          {hexaTabMenuOpen&&<div className="am-tab-visibility-panel" id="hexa-tab-visibility-panel" role="group" aria-label="Tùy chỉnh các mục phụ">
-            <div className="am-tab-visibility-head"><strong>Hiển thị trong “Thêm”</strong><button type="button" onClick={()=>hexaSetTabMenuOpen(false)} aria-label="Đóng"><X size={16}/></button></div>
-            {hexaOptionalModes.map(([id,label,Icon])=><label className="am-tab-visibility-option" key={id}><input type="checkbox" checked={!hexaHiddenTabs.includes(id)} onChange={()=>hexaToggleTab(id)}/><Icon size={15}/><span>{label}</span></label>)}
-            <button type="button" className="am-tab-visibility-reset" onClick={()=>hexaSetHiddenTabs([])}>Hiện tất cả mục phụ</button>
-          </div>}
-        </div>
       </div>
     </div>
     {error&&<div className="am-error am-banner">{error}<button onClick={()=>setError('')} aria-label="Đóng lỗi"><X size={15}/></button></div>}
@@ -404,7 +395,7 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
         <SortableHeader label="Trạng thái" sortKey="status" activeKey={filters.sortBy} onToggle={toggleAssetSort}/>
         <th scope="col">Thao tác</th>
       </tr></thead>
-        <tbody>{data.items.map(item=><tr key={item.id}><td><button className="am-link strong" onClick={()=>setDetail(item)}>{item.assetCode}</button></td><td><b title={item.assetName}>{item.assetName}</b><small>{item.categoryName||'Chưa phân loại'}</small></td><td>{item.ownerDepartmentName||'—'}</td><td>{item.assignedTo||'—'}</td><td>{item.serialNumber||'—'}<small>{item.ipAddress||''}</small></td><td><span className={`am-status ${item.status}`}>{STATUS[item.status]||item.status}</span></td><td><div className="am-row-actions">
+        <tbody>{data.items.map(item=><tr key={item.id}><td><button className="am-link strong" title={item.assetCode} onClick={()=>setDetail(item)}>{item.assetCode}</button></td><td><b title={item.assetName}>{item.assetName}</b><small>{item.categoryName||'Chưa phân loại'}</small></td><td>{item.ownerDepartmentName||'—'}</td><td>{item.assignedTo||'—'}</td><td>{item.serialNumber||'—'}<small>{item.ipAddress||''}</small></td><td><span className={`am-status ${item.status}`}>{STATUS[item.status]||item.status}</span></td><td><div className="am-row-actions">
           {mode==='assets'?<><button title="Chi tiết / Lịch sử" onClick={()=>setDetail(item)}><History size={15}/></button><button title="Mã QR" onClick={()=>setDetail({...item,initialTab:'qr'})}><QrCode size={15}/></button><button title="Sửa" onClick={()=>setEditing(item)}><Pencil size={15}/></button><button title={item.status==='using'?'Thu hồi':'Bàn giao'} onClick={()=>setAssigning(item)}><ArrowRightLeft size={15}/></button><button title="Xóa mềm" onClick={()=>remove(item)}><Trash2 size={15}/></button></>:<button className="am-btn am-light" onClick={()=>restore(item)}><RotateCcw size={15}/> Khôi phục</button>}
           </div></td></tr>)}
           {!loading&&!data.items.length&&<tr><td colSpan={7} className="am-empty"><PackageSearch size={28}/> Chưa có tài sản phù hợp với bộ lọc.</td></tr>}
