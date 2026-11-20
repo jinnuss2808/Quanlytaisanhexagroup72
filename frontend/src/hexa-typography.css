@@ -1,0 +1,113 @@
+/* HEXA TYPOGRAPHY V1 (2026-11-20)
+ * Text-only visual enhancement. No layout/height/width/padding changes.
+ * Body: DM Sans; headings: Sora (Manrope fallback). Keeps QR and asset grids intact.
+ */
+:root {
+  --hexa-font-body: 'DM Sans', 'Segoe UI', Arial, sans-serif;
+  --hexa-font-heading: 'Sora', 'Manrope', 'Segoe UI', sans-serif;
+}
+html, body, #root {
+  font-family: var(--hexa-font-body) !important;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+.admin-root, .am-root, .pm-root, .hm-root,
+.admin-root button, .admin-root input, .admin-root select, .admin-root textarea,
+.am-overlay button, .am-overlay input, .am-overlay select, .am-overlay textarea,
+.pm-overlay button, .pm-overlay input, .pm-overlay select, .pm-overlay textarea {
+  font-family: var(--hexa-font-body);
+}
+/* Sora: modern, slightly distinctive but restrained for Vietnamese headings */
+.admin-root :is(h1,h2,h3,h4),
+.am-root :is(h1,h2,h3,h4),
+.pm-root :is(h1,h2,h3,h4),
+.hm-root :is(h1,h2,h3,h4),
+.am-overlay :is(h1,h2,h3,h4),
+.pm-overlay :is(h1,h2,h3,h4),
+.admin-root :is(.panel-header,.list-top,.dash-heading) :is(h1,h2,h3),
+.am-root :is(.am-heading,.am-modal-header) :is(h2,h3),
+.hm-root .hm-toolbar > strong {
+  font-family: var(--hexa-font-heading);
+  font-weight: 750;
+  letter-spacing: -.032em;
+  line-height: 1.3;
+}
+.admin-root :is(.panel-header,.list-top) h3,
+.am-root .am-heading h3, .pm-root .pm-head h3,
+.hm-root .hm-panel h3 { font-size: 15.5px; }
+.am-root .am-modal-header h2, .admin-root .dash-heading h1 { letter-spacing: -.035em; }
+/* Navigation, filters and toolbar: readable at browser zoom 100%. */
+.admin-root .side-link {font-size: 12.5px !important;font-weight: 700;letter-spacing: 0;}
+.admin-root .side-label {font-size: 9.5px;letter-spacing: .16em;}
+.admin-root .breadcrumbs {font-size: 11.5px;font-weight: 550;}
+.am-root .am-main-tabs button,
+.am-root .am-tabs-toolbar button,
+.am-root .am-pill-tabs button,
+.pm-root .pm-tabs button {font-size: 11.75px !important;font-weight: 750;letter-spacing: -.005em;}
+.am-root :is(.am-btn,.am-tab-settings-trigger),
+.pm-root :is(.pm-primary,.am-btn),
+.hm-root :is(.hm-btn,.hm-btn-tight,.hm-group-btn) {font-size: 11.75px !important;font-weight: 750;letter-spacing: 0;}
+.am-root .am-filter-bar :is(input,select),
+.pm-root .pm-search input,
+.hm-root :is(.hm-search input,.hm-toolbar-search input,.hm-compact-select),
+.hm-root .hm-form :is(input,select,textarea) {
+  font-size: 12px !important;
+  font-weight: 550;
+  letter-spacing: 0;
+}
+/* Data tables: single visual scale without making rows taller. */
+.am-root .am-table th,
+.pm-root .pm-printer-table th,
+.hm-root .hm-scroll th {
+  font-family: var(--hexa-font-body);
+  font-size: 11px !important;
+  font-weight: 800;
+  letter-spacing: .008em;
+  line-height: 1.35;
+}
+.am-root .am-table td,
+.pm-root .pm-printer-table td,
+.hm-root .hm-scroll td {
+  font-family: var(--hexa-font-body);
+  font-size: 12.5px !important;
+  font-weight: 550;
+  line-height: 1.43;
+  letter-spacing: 0;
+}
+.am-root .am-table td :is(b,strong),
+.pm-root .pm-printer-table td :is(b,strong),
+.hm-root .hm-scroll td :is(b,strong) {
+  font-size: 12.75px;
+  font-weight: 800;
+  letter-spacing: -.012em;
+}
+.am-root .am-table td small,
+.pm-root .pm-printer-table td small,
+.hm-root .hm-scroll td small {
+  font-size: 10.75px !important;
+  font-weight: 550;
+  line-height: 1.4;
+}
+.am-root .am-table td:first-child,
+.am-root .am-stat strong,
+.hm-root .hm-roster-scroll td:first-child {
+  font-variant-numeric: tabular-nums;
+}
+.am-root .am-stat strong {font-family: var(--hexa-font-heading);letter-spacing:-.03em;font-weight:750;}
+.am-root .am-status {font-size: 10.5px !important;font-weight: 750;}
+/* Small summary chips used in the latest HEXA toolbar. */
+.am-root :is(.am-inline-stats,.am-toolbar-stat,.am-compact-stat) strong,
+.am-root .am-warehouse-summary strong {font-family: var(--hexa-font-heading);font-weight:750;letter-spacing:-.025em;}
+/* Clear focus states without modifying component geometry. */
+.admin-root :is(button,input,select,textarea):focus-visible,
+.am-overlay :is(button,input,select,textarea):focus-visible {
+  outline:2px solid #248b7d;
+  outline-offset:2px;
+}
+@media (max-width: 800px) {
+  .admin-root .side-link {font-size:12px !important;}
+  .am-root .am-table td, .pm-root .pm-printer-table td,
+  .hm-root .hm-scroll td {font-size:12px !important;}
+  .am-root .am-main-tabs button,.pm-root .pm-tabs button {font-size:11px !important;}
+}
