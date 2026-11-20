@@ -1,0 +1,27 @@
+HEXA - THAY LOGO KHONG CAN MANG
+
+Goi gom 3 file:
+- DOI_LOGO_HEXA_OFFLINE.bat  (nhap dup chay file nay)
+- CAP_NHAT_LOGO_LOCAL.cjs   (cap nhat App.jsx / styles.css)
+- hexa-sidebar-logo.png    (logo HEXA Group tu anh ban cung cap, cat vien trong suot)
+
+1. Giai nen ca 3 file vao thu muc project goc:
+   E:\HEXA-Ticket-Asset-ONE-DEPLOY-CLEAN\HEXA-Ticket-Asset-ONE-DEPLOY
+   Cung cap voi frontend va backend.
+2. Nhap dup DOI_LOGO_HEXA_OFFLINE.bat.
+3. Sau khi hien [OK], chay:
+   cd frontend
+   npm run build
+   npm run dev
+4. Mo website local, nhan Ctrl+Shift+R. Click logo de tai lai trang hien tai.
+5. Neu da kiem tra thanh cong, ve project goc va chay:
+   git add frontend/src/App.jsx frontend/src/styles.css frontend/public/hexa-sidebar-logo.png
+   git commit -m "Update HEXA sidebar logo offline"
+   git push origin main
+
+Ghi chu:
+- File anh duoc sao chep vao frontend/public, khong can Firebase Storage,
+  khong can tai link 1Office, khong can Internet de chay BAT.
+- BAT khong deploy len Vercel tu dong.
+- Code goc duoc backup vao thu muc TEMP truoc khi thay doi.
+- Neu da sua logo bang ban cu, BAT se cap nhat lai duong dan va anh local.

@@ -6,7 +6,7 @@ import {
   Boxes, Box, Laptop, Plus, Search, Upload, Download, Pencil, Trash2, RotateCcw,
   ArrowRightLeft, History, QrCode, X, RefreshCw, Save, CheckCircle2,
   LayoutGrid, Wrench, AlertTriangle, Building2, Tags, HardDrive, Copy, ExternalLink,
-  ImagePlus, Monitor, PackageSearch, ChevronLeft, ChevronRight, Info
+  Monitor, PackageSearch, ChevronLeft, ChevronRight, Info
 } from 'lucide-react';
 import './asset-management.css';
 import SortableHeader from './SortableHeader.jsx';
@@ -29,7 +29,7 @@ async function rawRequest(path, {method='GET',body,headers={},blob=false}={}) {
   let response;
   try{response=await fetch(`${BASE}/api${path}`,{method,headers:{Authorization:`Bearer ${token}`,...headers},body});}
   catch{throw new Error('Không kết nối được máy chủ quản lý tài sản.');}
-  if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||`HTTP ${response.status}`);}
+  if(!response.ok){const data=await response.json().catch(()=>({}));const detail=data.error || (response.status===413?'Dữ liệu gửi lên vượt giới hạn cho phép.':`HTTP ${response.status} khi gọi API.`);throw new Error(detail);}
   return blob ? response.blob() : response.json();
 }
 function download(blob,file){const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=file;link.click();URL.revokeObjectURL(url);}
@@ -59,6 +59,8 @@ function AssetForm({item,catalogs,onClose,onSaved}){
         <Field label="Ghi chú" wide><textarea rows={3} value={form.description} onChange={e=>setField(setForm,'description',e.target.value)}/></Field>
       </div>
       <div className="am-note"><Info size={15}/> Công ty sở hữu không tự thay đổi khi bàn giao. Chỉnh người sử dụng qua chức năng “Bàn giao / Thu hồi” để lưu lịch sử.</div>
+      {edit && item?.assignedTo && item.status!=='available' && item.status!=='using' && form.status==='available' &&
+        <div className="am-note"><Info size={15}/> Tài sản còn người sử dụng cũ: <b>{item.assignedTo}</b>. Khi lưu về Có sẵn, hệ thống sẽ thu hồi người sử dụng cũ và ghi lịch sử.</div>}
       {error&&<p className="am-error">{error}</p>}
       <footer className="am-actions"><button type="button" className="am-btn am-light" onClick={onClose}>Hủy</button><button disabled={busy} className="am-btn am-primary"><Save size={16}/>{busy?'Đang lưu...':'Lưu tài sản'}</button></footer>
     </form>
@@ -102,14 +104,6 @@ function CatalogManager({catalogs,onSaved}){
     {error&&<p className="am-error">{error}</p>}
     <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Mã</th><th>Tên</th><th>Mô tả</th><th>Thao tác</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td><strong>{r.code}</strong></td><td>{r.name}</td><td>{r.description||'—'}</td><td><button className="am-link" onClick={()=>{setEditing(r.id);setCode(r.code);setName(r.name);setDescription(r.description||'');}}>Sửa</button><button className="am-link danger" onClick={()=>remove(r)}>Xóa</button></td></tr>)}</tbody></table></div>
   </div>;
-}
-function AssetPhoto({assetId,image}){
-  const [src,setSrc]=useState('');
-  useEffect(()=>{let alive=true,url='';(async()=>{
-    const blob=await rawRequest(`/assets/${assetId}/images/${image.id}/file`,{blob:true});
-    url=URL.createObjectURL(blob);if(alive)setSrc(url);else URL.revokeObjectURL(url);
-  })().catch(()=>{});return()=>{alive=false;if(url)URL.revokeObjectURL(url);};},[assetId,image.id]);
-  return src?<img className="am-photo" src={src} alt="Hình ảnh tài sản"/>:<div className="am-photo am-photo-empty">Không xem được ảnh</div>;
 }
 function MaintenanceEditor({item,onClose,onSaved}){
   const [form,setForm]=useState({type:'repair',date:new Date().toISOString().slice(0,10),summary:'',notes:'',replacedParts:'',performedBy:'',serviceProvider:'',cost:'0',ticketCode:'',stockItemId:'',stockQuantity:'1'});
@@ -184,10 +178,11 @@ export function AssetQrLabel({item,url}) {
     <div className="am-qr-label">
       {qr?<img className="am-qr-image" src={qr} alt={`QR của tài sản ${item.assetCode}`}/>:<div className="am-qr-placeholder">Đang tạo mã QR...</div>}
       <strong>{item.assetCode}</strong><span>{item.assetName}</span>
+      <div className="am-qr-meta"><div><small>Công ty sở hữu</small><b>{item.ownerDepartmentName||'Chưa cập nhật'}</b></div><div><small>Người đang sử dụng</small><b>{item.assignedTo||'Chưa bàn giao'}</b></div><div><small>Địa chỉ IP</small><b>{item.ipAddress||'Chưa cập nhật'}</b></div></div>
     </div>
     <div className="am-qr-description">
       <h4>Mã QR của tài sản</h4>
-      <p className="am-muted">Quét mã để mở trang thông tin công khai của tài sản này. Mã QR được tạo trên máy, không cần dịch vụ bên ngoài.</p>
+      <p className="am-muted">Quét mã để mở hồ sơ tài sản. Người đã đăng nhập IT xem thêm IP và người sử dụng; người ngoài chỉ thấy thông tin cơ bản.</p>
       <div className="am-url">{url}</div>
       <div className="am-qr-actions">
         <button type="button" className="am-btn am-primary" onClick={saveQr} disabled={!qr}><Download size={15}/> Tải QR PNG</button>
@@ -201,24 +196,18 @@ export function AssetQrLabel({item,url}) {
   </div>;
 }
 function AssetDetail({item,onClose,onRefresh}){
-  const [tab,setTab]=useState(item.initialTab||'info'),[history,setHistory]=useState({history:[],assignments:[],maintenance:[]}),[software,setSoftware]=useState([]),[images,setImages]=useState([]);
+  const [tab,setTab]=useState(item.initialTab||'info'),[history,setHistory]=useState({history:[],assignments:[],maintenance:[]}),[software,setSoftware]=useState([]);
   const [name,setName]=useState(''),[version,setVersion]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[addMaintenance,setAddMaintenance]=useState(false);
   const reload=useCallback(async()=>{
     const h=await api(`/assets/${item.id}/history`);setHistory(h);
-    if(!item.deletedAt){const [s,i]=await Promise.all([api(`/assets/${item.id}/software`),api(`/assets/${item.id}/images`)]);setSoftware(s);setImages(i);}
+    if(!item.deletedAt){const softwareItems=await api(`/assets/${item.id}/software`);setSoftware(softwareItems);}
   },[item.id]);
   useEffect(()=>{reload().catch(err=>setMessage(err.message));},[reload]);
   const addSoftware=async e=>{e.preventDefault();setBusy(true);setMessage('');try{await api(`/assets/${item.id}/software`,{method:'POST',body:{softwareName:name,version}});setName('');setVersion('');await reload();}catch(err){setMessage(err.message);}finally{setBusy(false);}};
-  const upload=async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;
-    setBusy(true);setMessage('');try{
-      if(file.size>5*1024*1024)throw new Error('Ảnh phải nhỏ hơn 5 MB.');
-      await rawRequest(`/assets/${item.id}/images`,{method:'POST',headers:{'Content-Type':file.type},body:file});await reload();
-    }catch(err){setMessage(err.message);}finally{setBusy(false);}};
-  const removeImage=async im=>{if(!window.confirm('Xóa ảnh này?'))return;try{await api(`/assets/${item.id}/images/${im.id}`,{method:'DELETE'});await reload();}catch(err){setMessage(err.message);}};
   const removeSoftware=async sw=>{if(!window.confirm('Xóa phần mềm này?'))return;try{await api(`/assets/${item.id}/software/${sw.id}`,{method:'DELETE'});await reload();}catch(err){setMessage(err.message);}};
   const url=publicLink(item.publicId);
   return <Modal title={item.assetName} subtitle={item.assetCode} onClose={onClose} wide fixedDetail>
-    <div className="am-pill-tabs am-detail-tabs">{[['info','Thông tin'],['history','Lịch sử'],['maintenance','Sửa chữa / thay linh kiện'],['software','Phần mềm'],['images','Hình ảnh'],['qr','Mã QR / liên kết']].map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</div>
+    <div className="am-pill-tabs am-detail-tabs">{[['info','Thông tin'],['history','Lịch sử'],['maintenance','Sửa chữa / thay linh kiện'],['software','Phần mềm'],['qr','Mã QR / liên kết']].map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</div>
     <div className="am-detail-body">
       {tab==='info'&&<div className="am-detail-grid">{[
         ['Mã tài sản',item.assetCode],['Tên tài sản',item.assetName],['Loại',item.categoryName||'—'],['Công ty sở hữu',item.ownerDepartmentName||'—'],
@@ -232,8 +221,6 @@ function AssetDetail({item,onClose,onRefresh}){
         </>}
       {tab==='software'&&<><form onSubmit={addSoftware} className="am-inline-form"><input required placeholder="Tên phần mềm" value={name} onChange={e=>setName(e.target.value)}/><input placeholder="Phiên bản" value={version} onChange={e=>setVersion(e.target.value)}/><button disabled={busy} className="am-btn am-primary">Thêm</button></form>
         <div className="am-table-wrap"><table className="am-table"><thead><tr><th>Phần mềm</th><th>Phiên bản</th><th>Thao tác</th></tr></thead><tbody>{software.map(x=><tr key={x.id}><td>{x.softwareName}</td><td>{x.version||'—'}</td><td><button className="am-link danger" onClick={()=>removeSoftware(x)}>Xóa</button></td></tr>)}</tbody></table></div></>}
-      {tab==='images'&&<><div className="am-split"><p className="am-muted">Tối đa 6 ảnh, mỗi ảnh tối đa 5 MB. Cần cấu hình Firebase Storage.</p><label className="am-btn am-primary"><ImagePlus size={15}/> Thêm ảnh<input type="file" hidden accept="image/png,image/jpeg,image/webp" disabled={busy||images.length>=6} onChange={upload}/></label></div>
-        <div className="am-photo-grid">{images.map(img=><div key={img.id}><AssetPhoto assetId={item.id} image={img}/><button className="am-link danger" onClick={()=>removeImage(img)}>Xóa</button></div>)}</div></>}
       {tab==='qr'&&<AssetQrLabel item={item} url={url}/>}
 
       {message&&<p className="am-error">{message}</p>}
@@ -396,7 +383,7 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
         <th scope="col">Thao tác</th>
       </tr></thead>
         <tbody>{data.items.map(item=><tr key={item.id}><td><button className="am-link strong" title={item.assetCode} onClick={()=>setDetail(item)}>{item.assetCode}</button></td><td><b title={item.assetName}>{item.assetName}</b><small>{item.categoryName||'Chưa phân loại'}</small></td><td>{item.ownerDepartmentName||'—'}</td><td>{item.assignedTo||'—'}</td><td>{item.serialNumber||'—'}<small>{item.ipAddress||''}</small></td><td><span className={`am-status ${item.status}`}>{STATUS[item.status]||item.status}</span></td><td><div className="am-row-actions">
-          {mode==='assets'?<><button title="Chi tiết / Lịch sử" onClick={()=>setDetail(item)}><History size={15}/></button><button title="Mã QR" onClick={()=>setDetail({...item,initialTab:'qr'})}><QrCode size={15}/></button><button title="Sửa" onClick={()=>setEditing(item)}><Pencil size={15}/></button><button title={item.status==='using'?'Thu hồi':'Bàn giao'} onClick={()=>setAssigning(item)}><ArrowRightLeft size={15}/></button><button title="Xóa mềm" onClick={()=>remove(item)}><Trash2 size={15}/></button></>:<button className="am-btn am-light" onClick={()=>restore(item)}><RotateCcw size={15}/> Khôi phục</button>}
+          {mode==='assets'?<><button title="Chi tiết / Lịch sử" onClick={()=>setDetail(item)}><History size={15}/></button><button title="Mã QR" onClick={()=>setDetail({...item,initialTab:'qr'})}><QrCode size={15}/></button><button title="Sửa" onClick={()=>setEditing(item)}><Pencil size={15}/></button><button title={item.status==='using'?'Thu hồi':item.status==='available'?'Bàn giao':'Chuyển về Có sẵn trước khi bàn giao'} onClick={()=>{if(item.status==='using'||item.status==='available')setAssigning(item);else{setEditing(item);setNotice('Hãy chuyển tài sản về Có sẵn, lưu lại rồi mới bàn giao.');}}}><ArrowRightLeft size={15}/></button><button title="Xóa mềm" onClick={()=>remove(item)}><Trash2 size={15}/></button></>:<button className="am-btn am-light" onClick={()=>restore(item)}><RotateCcw size={15}/> Khôi phục</button>}
           </div></td></tr>)}
           {!loading&&!data.items.length&&<tr><td colSpan={7} className="am-empty"><PackageSearch size={28}/> Chưa có tài sản phù hợp với bộ lọc.</td></tr>}
           {loading&&!data.items.length&&<tr><td colSpan={7} className="am-empty">Đang tải dữ liệu...</td></tr>}
@@ -417,12 +404,31 @@ export default function AssetManagement({user,initialTicket=null,onClearInitialT
   </div>;
 }
 
+// HEXA_QR_PHOTO_FIX_20261120: QR public/basic; private detail only with authenticated IT token.
 export function PublicAssetPage({publicId}){
-  const [item,setItem]=useState(null),[error,setError]=useState('');
-  useEffect(()=>{fetch(`${BASE}/api/public/assets/${encodeURIComponent(publicId)}`).then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error||'Không tìm thấy tài sản.');return data;}).then(setItem).catch(e=>setError(e.message));},[publicId]);
+  const [item,setItem]=useState(null),[detail,setDetail]=useState(null),[error,setError]=useState(''),[privateError,setPrivateError]=useState('');
+  useEffect(()=>{let alive=true;setItem(null);setError('');
+    fetch(`${BASE}/api/public/assets/${encodeURIComponent(publicId)}`).then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error||'Không tìm thấy tài sản.');return data;})
+      .then(data=>{if(alive)setItem(data);}).catch(e=>{if(alive)setError(e.message);});
+    return()=>{alive=false;};
+  },[publicId]);
+  useEffect(()=>{let alive=true;setDetail(null);setPrivateError('');
+    const unsubscribe=auth.onAuthStateChanged(user=>{
+      if(!user){if(alive){setDetail(null);setPrivateError('');}return;}
+      api(`/assets/qr/${encodeURIComponent(publicId)}/private`)
+        .then(data=>{if(alive)setDetail(data);}).catch(e=>{if(alive)setPrivateError(e.message);});
+    });
+    return()=>{alive=false;unsubscribe();};
+  },[publicId]);
+  const display=detail?{...item,...detail}:item;
   return <main className="am-public"><div className="am-public-card"><div className="am-eyebrow">HEXA GROUP · QUẢN LÝ TÀI SẢN</div><h1>Thông tin tài sản</h1>
-    {error?<p className="am-error">{error}</p>:item?<div className="am-detail-grid">{[['Mã tài sản',item.assetCode],['Tên tài sản',item.assetName],['Loại',item.categoryName||'—'],['Công ty sở hữu',item.ownerDepartmentName||'—'],['Trạng thái',STATUS[item.status]||'—']].map(([k,v])=><div key={k}><small>{k}</small><strong>{v}</strong></div>)}</div>:<p>Đang tải...</p>}
-    <a className="am-btn am-primary" href="/">Trở về cổng hỗ trợ</a>
-    <p className="am-muted">Trang công khai chỉ hiển thị thông tin định danh, không tiết lộ IP, serial, người sử dụng hoặc giá mua.</p>
+    {error?<p className="am-error">{error}</p>:display?<div className="am-detail-grid">{[
+      ['Mã tài sản',display.assetCode],['Tên tài sản',display.assetName],['Loại thiết bị',display.categoryName||'Chưa cập nhật'],
+      ['Công ty sở hữu',display.ownerDepartmentName||'Chưa cập nhật'],['Trạng thái',STATUS[display.status]||'Chưa cập nhật'],
+      ...(detail?[['Người đang sử dụng',detail.assignedTo||'Chưa bàn giao'],['Phòng ban sử dụng',detail.userDepartment||'Chưa cập nhật'],['Địa chỉ IP',detail.ipAddress||'Chưa cập nhật'],['Serial',detail.serialNumber||'Chưa cập nhật']]:[])
+    ].map(([k,v])=><div key={k}><small>{k}</small><strong>{v}</strong></div>)}</div>:<p>Đang tải...</p>}
+    {!detail&&item&&<p className="am-qr-login-note">IP, serial và người đang sử dụng chỉ hiển thị khi đăng nhập tài khoản IT tại <a href="/it">HEXA IT</a>. Sau khi đăng nhập, hãy quét hoặc mở lại QR.</p>}
+    {privateError&&<p className="am-muted">Thông tin nội bộ chưa hiển thị: {privateError}</p>}
+    <a className="am-btn am-primary" href="/it">Về trang quản lý IT</a>
   </div></main>;
 }

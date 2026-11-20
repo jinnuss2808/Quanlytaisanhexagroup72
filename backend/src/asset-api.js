@@ -1,7 +1,6 @@
 import express from 'express';
 import { db } from './firebase.js';
-import { getStorage } from 'firebase-admin/storage';
-import { assetError, asText, normalizeAsset, keyForCode, assetUUID, enrichAsset, selectAssets, parseCSV, mapLegacyCSV, toCSV } from './asset-core.js';
+import { assetError, asText, normalizeAsset, keyForCode, assetUUID, prepareAssetStatusEdit, enrichAsset, selectAssets, parseCSV, mapLegacyCSV, toCSV } from './asset-core.js';
 import { transactExistingTicket as conditionalUpdate } from './ticket-transaction.js';
 import { readAssetExcel,writeAssetExcel } from './asset-excel.js';
 import { prepareExcelImport } from './asset-xlsx-import.js';
@@ -321,9 +320,11 @@ router.get('/:id',wrap(async(req,res)=>{
 router.patch('/:id',wrap(async(req,res)=>{
   const id=validId(req.params.id),old=await assetById(id);
   const data=normalizeAsset({...old,...req.body,assignedTo:old.assignedTo});
-  if(data.assignedTo!==old.assignedTo)throw assetError(409,'Để thay đổi người sử dụng, hãy Bàn giao/Thu hồi.');
-  if(old.status==='using'&&data.status!=='using')throw assetError(409,'Hãy thu hồi tài sản trước khi đổi trạng thái.');
-  if(old.status!=='using'&&data.status==='using')throw assetError(409,'Hãy bàn giao để chuyển sang Đang sử dụng.');
+  const previousAssignee=asText(old.assignedTo,255)||null;
+  if (Object.prototype.hasOwnProperty.call(req.body||{},'assignedTo') &&
+      (asText(req.body.assignedTo,255)||null)!==previousAssignee)
+    throw assetError(409,'Để thay đổi người sử dụng, hãy Bàn giao/Thu hồi.');
+  const transition=prepareAssetStatusEdit(old,data.status);
   // Keep company ownership immutable except via explicitly authorized manager update.
   if(req.it.role!=='manager'&&data.ownerDepartmentId!==old.ownerDepartmentId)throw assetError(403,'Chỉ Admin được thay đổi công ty sở hữu.');
   await checkCatalog(data);
@@ -331,11 +332,24 @@ router.patch('/:id',wrap(async(req,res)=>{
   let changed;
   try {changed=await edited(id,current=>{
       if(current.updatedAt!==old.updatedAt)throw assetError(409,'Tài sản vừa được người khác sửa.');
-      return {...current,...data,assignedTo:current.assignedTo,updatedAt:Date.now()};
+      return {...current,...data,assignedTo:transition.assignedTo,updatedAt:Date.now()};
     });}
   catch(err){if(data.assetCode!==old.assetCode)await db.ref('assetCodeIndex/'+keyForCode(data.assetCode)).remove().catch(()=>{});throw err;}
   if(data.assetCode!==old.assetCode)await db.ref('assetCodeIndex/'+keyForCode(old.assetCode)).remove();
-  await addLog(id,'updated',req.it,{summary:'Đã sửa thông tin tài sản',changes:auditChanges(old,changed)});res.json(changed);
+  if(transition.recoveredAssignee){
+    const records=await obj(`assetAssignments/${id}`);
+    const ongoing=Object.values(records).filter(x=>!x.returnedAt)
+      .sort((a,b)=>(b.assignedAt||0)-(a.assignedAt||0))[0];
+    if(ongoing){
+      await db.ref(`assetAssignments/${id}/${ongoing.id}`).update({
+        returnedAt:Date.now(),returnedDate:new Date().toISOString().slice(0,10),
+        returnedBy:req.it.uid,returnNote:'Thu hồi người sử dụng cũ khi khôi phục tài sản về Có sẵn'
+      });
+    }
+  }
+  await addLog(id,'updated',req.it,{summary:transition.recoveredAssignee
+    ?'Khôi phục về Có sẵn và thu hồi người sử dụng cũ':'Đã sửa thông tin tài sản',
+    changes:auditChanges(old,changed)});res.json(changed);
 }));
 router.delete('/:id',wrap(async(req,res)=>{
   const id=validId(req.params.id),old=await assetById(id);
@@ -487,46 +501,19 @@ router.delete('/:id/software/:softwareId',wrap(async(req,res)=>{
   const id=validId(req.params.id),sid=validId(req.params.softwareId);await assetById(id);
   await db.ref(`assetSoftware/${id}/${sid}`).remove();await addLog(id,'software_deleted',req.it,{summary:'Xóa phần mềm'});res.json({ok:true});
 }));
-// Optional Firebase Storage images. File contents are never written into Realtime Database.
-function imageBucket(){
-  if(!process.env.FIREBASE_STORAGE_BUCKET)throw assetError(501,'Chưa cấu hình FIREBASE_STORAGE_BUCKET để lưu hình ảnh.');
-  return getStorage().bucket(process.env.FIREBASE_STORAGE_BUCKET);
-}
-router.get('/:id/images',wrap(async(req,res)=>{const id=validId(req.params.id);await assetById(id);res.json(array(await obj(`assetImages/${id}`)));}));
-router.post('/:id/images',express.raw({type:['image/jpeg','image/png','image/webp'],limit:'5mb'}),wrap(async(req,res)=>{
-  const id=validId(req.params.id);await assetById(id);const images=await obj(`assetImages/${id}`);
-  if(Object.keys(images).length>=6)throw assetError(409,'Tối đa 6 ảnh cho mỗi tài sản.');
-  const bytes=req.body;
-  if(!Buffer.isBuffer(bytes)||!bytes.length)throw assetError(400,'Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP.');
-  const jpeg=bytes[0]===255&&bytes[1]===216&&bytes[2]===255;
-  const png=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'));
-  const webp=bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP';
-  if(!jpeg&&!png&&!webp)throw assetError(400,'Tệp ảnh không hợp lệ.');
-  const mime=jpeg?'image/jpeg':png?'image/png':'image/webp';
-  const imageId=db.ref(`assetImages/${id}`).push().key;
-  const path=`hexa-assets/${id}/${imageId}.${jpeg?'jpg':png?'png':'webp'}`;
-  await imageBucket().file(path).save(bytes,{resumable:false,contentType:mime,metadata:{cacheControl:'private, max-age=0'}});
-  const record={id:imageId,path,mime,size:bytes.length,primary:Object.keys(images).length===0,createdAt:Date.now()};
-  await db.ref(`assetImages/${id}/${imageId}`).set(record);res.status(201).json(record);
+router.get('/qr/:publicId/private',wrap(async(req,res)=>{
+  const publicId=validId(req.params.publicId);
+  const id=(await db.ref(`assetPublicIds/${publicId}`).get()).val();
+  if(!id)throw assetError(404,'Không tìm thấy tài sản.');
+  const asset=await assetById(validId(id));
+  const {cats,depts}=await catalogs();
+  const info=enrichAsset(asset,cats,depts);
+  res.set('Cache-Control','private, no-store');
+  res.json({assetCode:info.assetCode,assetName:info.assetName,categoryName:info.categoryName,
+    ownerDepartmentName:info.ownerDepartmentName,status:info.status,
+    assignedTo:info.assignedTo||null,userDepartment:info.userDepartment||null,
+    ipAddress:info.ipAddress||null,serialNumber:info.serialNumber||null});
 }));
-router.get('/:id/images/:imageId/file',wrap(async(req,res)=>{
-  const id=validId(req.params.id),sid=validId(req.params.imageId);await assetById(id);
-  const image=(await db.ref(`assetImages/${id}/${sid}`).get()).val();if(!image)throw assetError(404,'Không tìm thấy ảnh.');
-  const [bytes]=await imageBucket().file(image.path).download();
-  res.set('Content-Type',image.mime);res.set('Cache-Control','private, no-store');res.set('X-Content-Type-Options','nosniff');res.send(bytes);
-}));
-router.patch('/:id/images/:imageId/primary',wrap(async(req,res)=>{
-  const id=validId(req.params.id),sid=validId(req.params.imageId);await assetById(id);
-  const items=await obj(`assetImages/${id}`);if(!items[sid])throw assetError(404,'Không tìm thấy ảnh.');
-  const updates={};for(const item of Object.values(items))updates[`assetImages/${id}/${item.id}/primary`]=item.id===sid;
-  await db.ref().update(updates);res.json({ok:true});
-}));
-router.delete('/:id/images/:imageId',wrap(async(req,res)=>{
-  const id=validId(req.params.id),sid=validId(req.params.imageId);await assetById(id);
-  const items=await obj(`assetImages/${id}`);if(!items[sid])throw assetError(404,'Không tìm thấy ảnh.');
-  await imageBucket().file(items[sid].path).delete({ignoreNotFound:true});await db.ref(`assetImages/${id}/${sid}`).remove();res.json({ok:true});
-}));
-
 export async function publicAssetHandler(req,res,next){
   try {
     const id=validId(req.params.publicId);

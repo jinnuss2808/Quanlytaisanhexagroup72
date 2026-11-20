@@ -471,7 +471,7 @@ function Dashboard({ user, onLogout }) {
   return <div className={'admin-root' + (sidebarCollapsed ? ' sidebar-collapsed' : '')}>
     {sidebarOpen && <button className="side-scrim" onClick={() => setSidebarOpen(false)} aria-label="Đóng menu"/>}
     <aside className={'sidebar ' + (sidebarOpen ? 'sidebar-open' : '')}>
-      <div className="side-brand"><div className="side-brand-name">HEXA<span>.</span></div></div><div className="side-label">BẢNG ĐIỀU KHIỂN</div>
+      <div className="side-brand"><button type="button" className="hexa-sidebar-brand-reload" title="Tai lai trang HEXA" aria-label="Tai lai trang HEXA" onClick={() => window.location.reload()}><img className="hexa-sidebar-brand-image" src="/hexa-sidebar-logo.png" alt="HEXA Group" /></button></div><div className="side-label">BẢNG ĐIỀU KHIỂN</div>
       <nav className="side-menu">{items.map(item => { const Icon = item.icon; return <button key={item.id} title={item.label} aria-label={item.label} onClick={() => selectSection(item.id)} className={'side-link ' + (section === item.id ? 'active' : '')}><Icon size={20}/><span className="side-link-text">{item.label}</span>{item.count > 0 && <span className="side-count">{item.count}</span>}</button>; })}</nav>
       <div className="side-bottom"><div className="side-profile"><div className="profile-avatar">{shortName(user.name)}</div><div className="profile-meta"><strong>{user.name}</strong><span>{isManager ? 'Quản lý IT' : 'Nhân viên IT'}</span></div><button title="Đăng xuất" onClick={onLogout}><LogOut size={18}/></button></div></div>
     </aside>

@@ -32,6 +32,21 @@ export function normalizeAsset(body = {}) {
     description: asText(body.description, 1000) || null
   };
 }
+
+// HEXA_STATUS_AND_STATS_20261119_V1: keep legacy null/undefined assignee values equivalent.
+export function prepareAssetStatusEdit(oldAsset, targetStatus) {
+  const originalAssignee = asText(oldAsset?.assignedTo,255) || null;
+  const previousStatus = asText(oldAsset?.status,30);
+  if (previousStatus === 'using' && targetStatus !== 'using')
+    throw assetError(409,'Hãy thu hồi tài sản trước khi đổi trạng thái.');
+  if (previousStatus !== 'using' && targetStatus === 'using')
+    throw assetError(409,'Hãy bàn giao để chuyển sang Đang sử dụng.');
+  // Imported legacy data sometimes retains a previous assignee on a broken asset.
+  // Marking that asset available closes the stale assignment and adds to audit.
+  const recoveredAssignee = originalAssignee && previousStatus !== 'available' &&
+    previousStatus !== 'using' && targetStatus === 'available' ? originalAssignee : null;
+  return {assignedTo: recoveredAssignee ? null : originalAssignee, recoveredAssignee};
+}
 export function enrichAsset(asset, cats = {}, depts = {}) {
   return { ...asset,
     categoryName: cats[asset.categoryId]?.name || ((asset.isPrinter || asset.assetType === 'printer') ? 'Máy in' : ''), categoryCode: cats[asset.categoryId]?.code || ((asset.isPrinter || asset.assetType === 'printer') ? 'PRINTER' : ''),

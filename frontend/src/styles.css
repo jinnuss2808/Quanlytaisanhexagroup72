@@ -220,3 +220,11 @@ body,.public-root,.admin-root,.admin-main,.admin-content{background:#ffffff!impo
 .control-wrap:focus-within,.field textarea:focus,.note-input:focus,input:focus,textarea:focus,select:focus{border-color:#86bfb5!important;box-shadow:0 0 0 3px rgba(11,107,94,.10)!important;outline:none}
 ::selection{background:#cae9e1;color:var(--hexa-green-dark)}
 /* HEXA_SOFT_GREEN_THEME_END */
+
+
+/* HEXA_LOGO_OFFLINE_V2_20261120: logo local (khong can link 1Office) */
+.side-brand .hexa-sidebar-brand-reload{display:flex;align-items:center;justify-content:flex-start;width:100%;min-width:0;padding:0;margin:0;border:0;background:transparent;border-radius:8px;cursor:pointer}
+.side-brand .hexa-sidebar-brand-reload:focus-visible{outline:2px solid #0a786d;outline-offset:3px}
+.side-brand .hexa-sidebar-brand-reload:hover{opacity:.88}
+.side-brand .hexa-sidebar-brand-image{display:block;width:auto;height:48px;max-width:100%;object-fit:contain;object-position:left center}
+@media (min-width:801px){.admin-root.sidebar-collapsed .side-brand .hexa-sidebar-brand-reload{width:45px;justify-content:center}.admin-root.sidebar-collapsed .side-brand .hexa-sidebar-brand-image{height:auto;max-width:42px;max-height:38px;object-position:center}}
