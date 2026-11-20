@@ -1,0 +1,153 @@
+/* HEXA_SIDEBAR_COMPACT_V1 - compact sidebar only. No backend or asset table edits. */
+@media (min-width: 801px) {
+  .admin-root:not(.sidebar-collapsed) > .sidebar {
+    width: 184px !important;
+    flex: 0 0 184px !important;
+  }
+  .admin-root.sidebar-collapsed > .sidebar {
+    width: 64px !important;
+    flex: 0 0 64px !important;
+  }
+}
+.admin-root .sidebar {
+  min-width: 0;
+  overflow-x: hidden;
+}
+.admin-root .sidebar .side-brand {
+  padding: 19px 13px 13px !important;
+}
+.admin-root .sidebar .side-brand .hexa-sidebar-brand-reload {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 40px !important;
+  height: 40px;
+  width: 100%;
+  padding: 0 !important;
+}
+.admin-root .sidebar .side-brand .hexa-sidebar-brand-image {
+  height: 40px !important;
+  max-height: 40px !important;
+  max-width: 120px !important;
+  width: auto !important;
+  object-fit: contain;
+  object-position: left center;
+}
+.admin-root .sidebar .side-label {
+  padding: 0 16px !important;
+  margin: 4px 0 10px !important;
+  font-size: 8.5px !important;
+  letter-spacing: .13em !important;
+  line-height: 1.4;
+}
+.admin-root .sidebar .side-menu {
+  padding: 0 10px !important;
+  gap: 3px !important;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.admin-root .sidebar .side-link {
+  min-height: 39px !important;
+  padding: 8px 11px !important;
+  gap: 10px !important;
+  border-radius: 9px !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+.admin-root .sidebar .side-link svg {
+  width: 17px !important;
+  height: 17px !important;
+  flex: 0 0 17px;
+}
+.admin-root .sidebar .side-bottom {
+  margin-top: auto;
+  padding: 9px !important;
+}
+.admin-root .sidebar .side-profile {
+  padding: 8px !important;
+  gap: 7px !important;
+  border-radius: 8px;
+}
+.admin-root .sidebar .profile-avatar {
+  width: 29px !important;
+  height: 29px !important;
+  flex: 0 0 29px;
+  border-radius: 7px !important;
+  font-size: 9px !important;
+}
+.admin-root .sidebar .profile-meta strong {
+  font-size: 10.5px !important;
+  line-height: 1.3;
+}
+.admin-root .sidebar .profile-meta span {
+  font-size: 9px !important;
+  line-height: 1.3;
+}
+.admin-root .sidebar .side-profile > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 5px !important;
+}
+.admin-root .sidebar .side-profile > button svg {
+  width: 15px;
+  height: 15px;
+}
+@media (min-width: 801px) {
+  .admin-root.sidebar-collapsed .sidebar .side-brand {
+    padding: 18px 7px 18px !important;
+    display: flex;
+    justify-content: center;
+  }
+  .admin-root.sidebar-collapsed .sidebar .side-brand .hexa-sidebar-brand-reload {
+    min-height: 34px !important;
+    height: 34px;
+    justify-content: center;
+    width: 46px;
+  }
+  .admin-root.sidebar-collapsed .sidebar .side-brand .hexa-sidebar-brand-image {
+    max-width: 42px !important;
+    max-height: 34px !important;
+    height: 34px !important;
+    object-position: center;
+  }
+  .admin-root.sidebar-collapsed .sidebar .side-menu {
+    padding: 0 7px !important;
+    gap: 4px !important;
+  }
+  .admin-root.sidebar-collapsed .sidebar .side-link {
+    width: 50px !important;
+    min-height: 42px !important;
+    padding: 9px !important;
+    justify-content: center;
+    gap: 0 !important;
+  }
+  .admin-root.sidebar-collapsed .sidebar .side-link svg {
+    width: 19px !important;
+    height: 19px !important;
+    flex: 0 0 19px;
+  }
+  .admin-root.sidebar-collapsed .sidebar .side-bottom {
+    padding: 6px !important;
+  }
+  .admin-root.sidebar-collapsed .sidebar .side-profile {
+    padding: 9px 0 6px !important;
+    gap: 7px !important;
+  }
+}
+@media (max-width: 800px) {
+  .admin-root .sidebar {
+    width: min(230px, 84vw) !important;
+    flex: 0 0 min(230px, 84vw) !important;
+  }
+  .admin-root .sidebar .side-link {
+    font-size: 12px !important;
+    min-height: 42px !important;
+  }
+}

@@ -4,6 +4,7 @@ import App from './App';
 import './styles.css';
 import './hexa-appearance.css';
 import './hexa-typography.css';
+import './hexa-sidebar-compact.css';
 class HEXAErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
